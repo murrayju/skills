@@ -33,7 +33,7 @@ unchanged:
 | Alias              | Full ID                      |
 | ------------------ | ---------------------------- |
 | `opus`, `opus-4.8` | `anthropic/claude-opus-4-8`  |
-| `gpt`, `gpt-5.5`   | `openai/gpt-5.5`             |
+| `gpt`, `gpt-5.5`   | `openai-codex/gpt-5.5`       |
 
 ## Instructions
 
