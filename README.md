@@ -8,10 +8,12 @@ loads when the skill is invoked.
 
 ## Skills
 
-- **review** — Run a focused code review using an Opus subagent. Reviews the
-  diff of the latest commit (or a specified range) for bugs, logic errors,
-  security issues, and missed edge cases. Invoke via `/skill:review` or
-  `/skill:review HEAD~3..HEAD`.
+- **review** — Run a focused code review using a stronger subagent model. By
+  default reviews the current branch (all commits since it diverged from the
+  default branch) for bugs, logic errors, security issues, and missed edge
+  cases. Supports a custom revision range and a selectable reviewer model.
+  Invoke via `/skill:review`, `/skill:review main..HEAD`, or
+  `/skill:review --model gpt-5.5`.
 
 ## Usage
 
