@@ -119,7 +119,16 @@ unchanged:
    if [ -n "$TMUX" ]; then
      # Running inside tmux: spawn a detached split pane (-d keeps the agent's
      # pane focused) so the user watches the review stream live.
-     tmux split-window -h -d "/tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
+     #
+     # Pick the split direction from the current pane's aspect ratio so each
+     # pane stays as close to square as possible. Terminal cells are roughly
+     # twice as tall as they are wide, so multiply the height (in cells) by 2
+     # to compare visual extents. If the pane is visually wider than tall,
+     # split side-by-side (-h); otherwise stack them top/bottom (-v).
+     PANE_W=$(tmux display-message -p '#{pane_width}')
+     PANE_H=$(tmux display-message -p '#{pane_height}')
+     if [ "$PANE_W" -gt "$((PANE_H * 2))" ]; then SPLIT_DIR=-h; else SPLIT_DIR=-v; fi
+     tmux split-window "$SPLIT_DIR" -d "/tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
      # Block until the subagent signals completion via the run-specific done-file.
      while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do sleep 2; done
      echo "Reviewer exited with status $(cat /tmp/pi-review-done-$REVIEW_ID)"
@@ -145,7 +154,10 @@ unchanged:
   (`/tmp/pi-review-*-$REVIEW_ID.*`), so multiple reviews can run in parallel
   without clobbering each other's diff, prompt, output, or done-file.
 - When invoked inside tmux, the reviewer runs in a detached split pane so the
-  user can watch it work live. The agent blocks (polling
+  user can watch it work live. The split direction adapts to the current
+  pane's aspect ratio (accounting for cells being ~twice as tall as wide):
+  side-by-side (`-h`) when the pane is wider than tall, stacked (`-v`)
+  otherwise, keeping both panes close to square. The agent blocks (polling
   `/tmp/pi-review-done-$REVIEW_ID`) until the review finishes, then reads the
   captured output from `/tmp/pi-review-output-$REVIEW_ID.md`. The pane is left open (the runner
   ends in `exec bash -i`) so the user can scroll the review and close the pane
