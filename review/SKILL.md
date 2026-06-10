@@ -5,8 +5,9 @@ description: Run a focused code review using a stronger subagent model. By defau
 
 # Code Review via Subagent
 
-Runs `pi --model <REVIEWER_MODEL> --print` to get a second opinion on code
-changes from a stronger model.
+Launches the full `pi` interface (`pi --model <REVIEWER_MODEL>`) in a live tmux
+pane to get a second opinion on code changes from a stronger model. The
+reviewer writes its report to a file so the agent never has to scrape stdout.
 
 ## Usage
 
@@ -32,6 +33,7 @@ unchanged:
 
 | Alias              | Full ID                                |
 | ------------------ | -------------------------------------- |
+| `fable`, `fable-5` | `anthropic/claude-fable-5`             |
 | `opus`, `opus-4.8` | `anthropic/claude-opus-4-8`            |
 | `gpt`, `gpt-5.5`   | `openai-codex/gpt-5.5`                 |
 | `gemini`           | `openrouter/google/gemini-3.5-flash`   |
@@ -86,39 +88,42 @@ unchanged:
 
 5. **Run the reviewer subagent in a live tmux pane.** Write the prompt and a
    tiny runner script to temp files (this avoids nested-quoting problems when
-   the prompt is long), then launch it in a detached split pane the user can
-   watch in real time, and block until it finishes.
+   the prompt is long), then launch the full `pi` TUI in a detached split pane
+   the user can watch in real time, and block until the reviewer signals it is
+   done.
 
-   First write the prompt (note the diff path includes the run ID):
+   First write the prompt (note the diff path includes the run ID). The prompt
+   tells the reviewer to write its report to the output file and then create a
+   done-file as its final action — this is how the agent knows it finished,
+   instead of scraping stdout:
    ```bash
    cat > /tmp/pi-review-prompt-$REVIEW_ID.txt <<EOF
-   You are a senior engineer reviewing a code diff. The diff is at /tmp/pi-review-diff-$REVIEW_ID.md. Read it, then review it focusing ONLY on bugs, logic errors, security issues, and missed edge cases. You have full access to the repository in the current working directory — read related files, trace callers, and run git commands as needed to understand the change in context. Do NOT comment on style, naming, or minor preferences. For each finding, cite the file and line, explain the issue, and suggest a fix. Output a numbered list, or say 'No issues found' if the code is clean.
+   You are a senior engineer reviewing a code diff. The diff is at /tmp/pi-review-diff-$REVIEW_ID.md. Read it, then review it focusing ONLY on bugs, logic errors, security issues, missed edge cases, and opportunities to simplify/DRY the code. You have full access to the repository in the current working directory — read related files, trace callers, and run git commands as needed to understand the change in context. Do NOT comment on style, naming, or minor preferences. For each finding, cite the file and line, explain the issue, and suggest a fix. Your report should be a numbered list, or say 'No issues found' if the code is clean.
+
+   IMPORTANT — how to deliver your report: do NOT just print it to the screen. When your review is complete, WRITE the full report to the file /tmp/pi-review-output-$REVIEW_ID.md using your file-writing tool. Then, as your VERY LAST action, create an empty signal file by running: touch /tmp/pi-review-done-$REVIEW_ID. Only create the done-file after the report file has been fully written.
    EOF
    ```
 
-   Then write the runner and launch it. The runner uses `set -o pipefail` so
-   the captured exit status reflects `pi`'s, and `tee` so output is both
-   visible live in the pane and captured to a file the agent reads afterward.
-   After signaling completion it drops into an interactive shell with `exec
-   bash -i`, so the pane stays open (with the full review scrolled above) for
-   the user to read — they close it themselves when done:
+   Then write the runner and launch it. The runner just execs the full
+   interactive `pi` TUI with the prompt as its initial message, so the user
+   sees live progress (tool calls, thinking, edits) in the pane. Because it is
+   the real interactive interface, the pane naturally stays open after the
+   review finishes — the user can scroll the session, ask follow-ups, or close
+   it themselves:
    ```bash
    # $1 = reviewer model, $2 = run ID. Every path is namespaced by the run ID.
    cat > /tmp/pi-review-run-$REVIEW_ID.sh <<'EOF'
    #!/usr/bin/env bash
-   set -o pipefail
    MODEL="$1"; ID="$2"
-   pi --model "$MODEL" --print -p "$(cat /tmp/pi-review-prompt-$ID.txt)" 2>&1 | tee /tmp/pi-review-output-$ID.md
-   echo $? > /tmp/pi-review-done-$ID
-   echo; echo '--- review complete; close this pane when done (Ctrl-d or your tmux kill-pane binding) ---'
-   exec bash -i
+   exec pi --model "$MODEL" -p "$(cat /tmp/pi-review-prompt-$ID.txt)"
    EOF
    chmod +x /tmp/pi-review-run-$REVIEW_ID.sh
    rm -f /tmp/pi-review-output-$REVIEW_ID.md /tmp/pi-review-done-$REVIEW_ID
 
    if [ -n "$TMUX" ]; then
      # Running inside tmux: spawn a detached split pane (-d keeps the agent's
-     # pane focused) so the user watches the review stream live.
+     # pane focused) so the user watches the live pi TUI without losing focus
+     # on the conversation with this agent.
      #
      # Pick the split direction from the current pane's aspect ratio so each
      # pane stays as close to square as possible. Terminal cells are roughly
@@ -131,15 +136,15 @@ unchanged:
      tmux split-window "$SPLIT_DIR" -d "/tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
      # Block until the subagent signals completion via the run-specific done-file.
      while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do sleep 2; done
-     echo "Reviewer exited with status $(cat /tmp/pi-review-done-$REVIEW_ID)"
+     echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
    else
      # Not in tmux: fall back to a normal blocking run.
      /tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' "$REVIEW_ID"
    fi
    ```
-   The pane stays open after the review completes so the user can read it; the
-   agent unblocks as soon as the done-file appears and reads the full review
-   from `/tmp/pi-review-output-$REVIEW_ID.md`.
+   The pane shows the live pi interface and stays open afterward. The agent
+   unblocks as soon as the done-file appears and reads the full review from
+   `/tmp/pi-review-output-$REVIEW_ID.md`.
 
 6. **Present the findings** (read them from `/tmp/pi-review-output-$REVIEW_ID.md`) to the user, then ask whether they'd like you to
    address any of them.
@@ -148,20 +153,25 @@ unchanged:
 
 - The default reviewer model is `anthropic/claude-opus-4-8`, used for deep code
   analysis. Override it per-invocation with `--model`.
-- The subagent runs in `--print` (non-interactive) mode — it reads the diff
-  file, explores the repo as needed, and exits with its review.
+- The subagent runs the **full interactive `pi` TUI** (not `--print`), so the
+  user sees its live progress — thinking, tool calls, file reads — stream in
+  the pane. The reviewer is instructed to write its report to
+  `/tmp/pi-review-output-$REVIEW_ID.md` and then `touch` a done-file as its
+  final action; the agent never scrapes stdout.
 - All temp files are namespaced with a per-invocation random `REVIEW_ID`
   (`/tmp/pi-review-*-$REVIEW_ID.*`), so multiple reviews can run in parallel
   without clobbering each other's diff, prompt, output, or done-file.
 - When invoked inside tmux, the reviewer runs in a detached split pane so the
-  user can watch it work live. The split direction adapts to the current
-  pane's aspect ratio (accounting for cells being ~twice as tall as wide):
-  side-by-side (`-h`) when the pane is wider than tall, stacked (`-v`)
-  otherwise, keeping both panes close to square. The agent blocks (polling
-  `/tmp/pi-review-done-$REVIEW_ID`) until the review finishes, then reads the
-  captured output from `/tmp/pi-review-output-$REVIEW_ID.md`. The pane is left open (the runner
-  ends in `exec bash -i`) so the user can scroll the review and close the pane
-  themselves. Outside tmux it falls back to a normal blocking run.
+  user can watch the live pi TUI without losing focus on the conversation with
+  this agent. The split direction adapts to the current pane's aspect ratio
+  (accounting for cells being ~twice as tall as wide): side-by-side (`-h`) when
+  the pane is wider than tall, stacked (`-v`) otherwise, keeping both panes
+  close to square. The agent blocks (polling `/tmp/pi-review-done-$REVIEW_ID`)
+  until the reviewer writes its done-file, then reads the report from
+  `/tmp/pi-review-output-$REVIEW_ID.md`. Because it is the real interactive
+  interface, the pane stays open after the review for the user to scroll, ask
+  follow-ups, or close themselves. Outside tmux it falls back to a normal
+  blocking run.
 - The subagent runs in the current working directory and has full tool access,
   so it can read any file, trace callers, and run git commands to understand
   the change in its broader context — it is not limited to the diff alone.
