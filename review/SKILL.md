@@ -104,9 +104,11 @@ unchanged:
    EOF
    ```
 
-   Then write the runner and launch it. The runner just execs the full
-   interactive `pi` TUI with the prompt as its initial message, so the user
-   sees live progress (tool calls, thinking, edits) in the pane. Because it is
+   Then write the runner and launch it. The runner execs the full interactive
+   `pi` TUI, passing the prompt as a **positional message** (NOT via `-p`,
+   which is the alias for `--print` and would run non-interactively). This
+   seeds the interactive session with the prompt so the user sees live
+   progress (tool calls, thinking, edits) in the pane. Because it is
    the real interactive interface, the pane naturally stays open after the
    review finishes — the user can scroll the session, ask follow-ups, or close
    it themselves:
@@ -115,7 +117,10 @@ unchanged:
    cat > /tmp/pi-review-run-$REVIEW_ID.sh <<'EOF'
    #!/usr/bin/env bash
    MODEL="$1"; ID="$2"
-   exec pi --model "$MODEL" -p "$(cat /tmp/pi-review-prompt-$ID.txt)"
+   # Pass the prompt as a POSITIONAL message, not via -p/--print: -p is the
+   # alias for --print (non-interactive, process-and-exit). A positional
+   # message launches the full interactive TUI seeded with that first message.
+   exec pi --model "$MODEL" "$(cat /tmp/pi-review-prompt-$ID.txt)"
    EOF
    chmod +x /tmp/pi-review-run-$REVIEW_ID.sh
    rm -f /tmp/pi-review-output-$REVIEW_ID.md /tmp/pi-review-done-$REVIEW_ID
