@@ -143,8 +143,12 @@ unchanged:
      while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do sleep 2; done
      echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
    else
-     # Not in tmux: fall back to a normal blocking run.
-     /tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' "$REVIEW_ID"
+     # Not in tmux: fall back to a non-interactive --print run. Interactive pi
+     # expects a real TTY and never auto-exits after the first message, so the
+     # agent's bash call would hang. -p/--print processes the prompt and exits;
+     # the reviewer still writes its report to the output file and creates the
+     # done-file as usual.
+     pi --model '<REVIEWER_MODEL>' -p "$(cat /tmp/pi-review-prompt-$REVIEW_ID.txt)"
    fi
    ```
    The pane shows the live pi interface and stays open afterward. The agent
@@ -158,9 +162,10 @@ unchanged:
 
 - The default reviewer model is `anthropic/claude-opus-4-8`, used for deep code
   analysis. Override it per-invocation with `--model`.
-- The subagent runs the **full interactive `pi` TUI** (not `--print`), so the
-  user sees its live progress — thinking, tool calls, file reads — stream in
-  the pane. The reviewer is instructed to write its report to
+- Inside tmux, the subagent runs the **full interactive `pi` TUI** (not
+  `--print`), so the user sees its live progress — thinking, tool calls, file
+  reads — stream in the pane. Outside tmux it falls back to non-interactive
+  `-p`/`--print` mode (see below). The reviewer is instructed to write its report to
   `/tmp/pi-review-output-$REVIEW_ID.md` and then `touch` a done-file as its
   final action; the agent never scrapes stdout.
 - All temp files are namespaced with a per-invocation random `REVIEW_ID`
@@ -175,8 +180,11 @@ unchanged:
   until the reviewer writes its done-file, then reads the report from
   `/tmp/pi-review-output-$REVIEW_ID.md`. Because it is the real interactive
   interface, the pane stays open after the review for the user to scroll, ask
-  follow-ups, or close themselves. Outside tmux it falls back to a normal
-  blocking run.
+  follow-ups, or close themselves. Outside tmux there is no pane to watch, so
+  the reviewer runs non-interactively via `-p`/`--print` (the interactive TUI
+  expects a real TTY and never auto-exits after the first message, which would
+  hang the agent's bash call); the reviewer still writes its report to the
+  output file and creates the done-file.
 - The subagent runs in the current working directory and has full tool access,
   so it can read any file, trace callers, and run git commands to understand
   the change in its broader context — it is not limited to the diff alone.
