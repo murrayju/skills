@@ -130,15 +130,23 @@ unchanged:
      # pane focused) so the user watches the live pi TUI without losing focus
      # on the conversation with this agent.
      #
-     # Pick the split direction from the current pane's aspect ratio so each
+     # Split RELATIVE TO THE AGENT'S OWN PANE, not the active pane. tmux sets
+     # $TMUX_PANE to the unique ID of the pane each process runs in, and the
+     # agent's bash inherits it. Without an explicit -t, split-window targets
+     # whatever pane is currently active — which may be a different pane the
+     # human focused for another task. Targeting $TMUX_PANE guarantees the new
+     # pane appears next to this agent regardless of where focus is.
+     AGENT_PANE="$TMUX_PANE"
+     #
+     # Pick the split direction from the agent pane's aspect ratio so each
      # pane stays as close to square as possible. Terminal cells are roughly
      # twice as tall as they are wide, so multiply the height (in cells) by 2
      # to compare visual extents. If the pane is visually wider than tall,
      # split side-by-side (-h); otherwise stack them top/bottom (-v).
-     PANE_W=$(tmux display-message -p '#{pane_width}')
-     PANE_H=$(tmux display-message -p '#{pane_height}')
+     PANE_W=$(tmux display-message -t "$AGENT_PANE" -p '#{pane_width}')
+     PANE_H=$(tmux display-message -t "$AGENT_PANE" -p '#{pane_height}')
      if [ "$PANE_W" -gt "$((PANE_H * 2))" ]; then SPLIT_DIR=-h; else SPLIT_DIR=-v; fi
-     tmux split-window "$SPLIT_DIR" -d "/tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
+     tmux split-window "$SPLIT_DIR" -d -t "$AGENT_PANE" "/tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
      # Block until the subagent signals completion via the run-specific done-file.
      while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do sleep 2; done
      echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
@@ -173,7 +181,11 @@ unchanged:
   without clobbering each other's diff, prompt, output, or done-file.
 - When invoked inside tmux, the reviewer runs in a detached split pane so the
   user can watch the live pi TUI without losing focus on the conversation with
-  this agent. The split direction adapts to the current pane's aspect ratio
+  this agent. The split is created relative to the agent's own pane (via
+  `$TMUX_PANE`, the pane ID the agent's process inherits), not the currently
+  active pane — so the reviewer always appears next to this agent even if the
+  human has focused a different pane for another task. The split direction
+  adapts to the agent pane's aspect ratio
   (accounting for cells being ~twice as tall as wide): side-by-side (`-h`) when
   the pane is wider than tall, stacked (`-v`) otherwise, keeping both panes
   close to square. The agent blocks (polling `/tmp/pi-review-done-$REVIEW_ID`)
