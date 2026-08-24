@@ -31,16 +31,19 @@ Arguments (any order, all optional):
 Map common short names to full IDs; pass anything containing a `/` through
 unchanged:
 
-| Alias              | Full ID                                |
-| ------------------ | -------------------------------------- |
-| `fable`, `fable-5` | `anthropic/claude-fable-5`             |
-| `opus`, `opus-4.8` | `anthropic/claude-opus-4-8`            |
-| `gpt`, `gpt-5.5`   | `openai-codex/gpt-5.5`                 |
-| `gemini`           | `openrouter/google/gemini-3.5-flash`   |
-| `glm`              | `openrouter/z-ai/glm-5.1`              |
-| `kimi`             | `openrouter/moonshotai/kimi-k2.6`      |
-| `deepseek`         | `openrouter/deepseek/deepseek-v4-pro`  |
-| `minimax`          | `openrouter/minimax/minimax-m3`        |
+| Alias                | Full ID                                |
+| -------------------- | -------------------------------------- |
+| `fable`, `fable-5`   | `openrouter/anthropic/claude-fable-5`  |
+| `opus`, `opus-5`     | `openrouter/anthropic/claude-opus-5`   |
+| `gpt`, `gpt-5.6-sol` | `openrouter/openai-codex/gpt-5.6-sol`  |
+| `gemini`             | `openrouter/google/gemini-3.7-flash`   |
+| `glm`                | `openrouter/z-ai/glm-5.3`              |
+| `kimi`               | `openrouter/moonshotai/kimi-k3`        |
+| `deepseek`           | `openrouter/deepseek/deepseek-v4-pro`  |
+| `minimax`            | `openrouter/minimax/minimax-m3`        |
+| `grok`               | `openrouter/x-ai/grok-4.6`             |
+
+Prefer to use the openrouter provider, when available there.
 
 ## Instructions
 
