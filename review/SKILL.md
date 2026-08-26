@@ -22,7 +22,8 @@ reviewer writes its report to a file so the agent never has to scrape stdout.
 Arguments (any order, all optional):
 
 - **`--model <name>` / `-m <name>`** — the reviewer model. Accepts a short
-  alias or a full `provider/model` ID. Defaults to `anthropic/claude-opus-4-8`.
+  alias or a full `provider/model` ID. Defaults to
+  `openrouter/anthropic/claude-opus-5`.
 - **Any other argument** — a git revision range. If omitted, defaults to the
   current branch (see below).
 
@@ -35,7 +36,7 @@ unchanged:
 | -------------------- | -------------------------------------- |
 | `fable`, `fable-5`   | `openrouter/anthropic/claude-fable-5`  |
 | `opus`, `opus-5`     | `openrouter/anthropic/claude-opus-5`   |
-| `gpt`, `gpt-5.6-sol` | `openrouter/openai-codex/gpt-5.6-sol`  |
+| `gpt`, `gpt-5.6-sol` | `openrouter/openai/gpt-5.6-sol`        |
 | `gemini`             | `openrouter/google/gemini-3.7-flash`   |
 | `glm`                | `openrouter/z-ai/glm-5.3`              |
 | `kimi`               | `openrouter/moonshotai/kimi-k3`        |
@@ -45,11 +46,20 @@ unchanged:
 
 Prefer to use the openrouter provider, when available there.
 
+Note the vendor prefix within an openrouter ID is the **model vendor**, not a
+pi provider name: OpenAI models are `openrouter/openai/...`. There is a
+separate `openai-codex` pi provider whose models are bare IDs (`gpt-5.6-sol`,
+no vendor prefix) — `openrouter/openai-codex/...` is never valid.
+
+These IDs drift as models are released and retired, so **always verify before
+launching** (step 1b) rather than trusting this table.
+
 ## Instructions
 
 1. **Parse the arguments.**
    - Extract the reviewer model from `--model`/`-m` if present, resolving
-     aliases via the table above. Otherwise use `anthropic/claude-opus-4-8`.
+     aliases via the table above. Otherwise use
+     `openrouter/anthropic/claude-opus-5`.
    - Treat any remaining non-flag argument as the git revision `RANGE`.
    - **Generate a unique run ID** so parallel reviews never clash on shared
      `/tmp` paths. Use it as `REVIEW_ID` in every temp filename below:
@@ -59,6 +69,44 @@ Prefer to use the openrouter provider, when available there.
      All the temp files in the steps that follow are named
      `/tmp/pi-review-<purpose>-$REVIEW_ID.*` — substitute the actual generated
      ID when you run the commands.
+
+1b. **Verify the model resolves before launching.** A bad model ID fails inside
+   the tmux pane, where the error is invisible to the agent — it just blocks on
+   the done-file until it times out. Always check first.
+
+   Split the resolved ID on its *first* `/` into pi provider + model, then
+   confirm **both** that the provider is authenticated and that the model
+   actually exists in that provider's catalog:
+   ```bash
+   # 1. provider auth (note: this validates ONLY the provider, never the model)
+   pi auth check --provider <PROVIDER> --model <MODEL>   # want: "ready"
+
+   # 2. model exists in that provider's catalog — this is the check that
+   #    actually catches a wrong/stale model ID
+   node -e "
+   const s=require(process.env.HOME+'/.pi/agent/models-store.json');
+   const [,p,...r]=process.argv; const m=r.join('/');
+   const ids=new Set(((s[p]||{}).models||[]).map(x=>x.id||x.name));
+   console.log(ids.has(m) ? 'model OK' : 'MODEL NOT FOUND in '+p);
+   " '<PROVIDER>' '<MODEL>'
+   ```
+   `pi auth check` returns `ready` for *any* model string as long as the
+   provider is authenticated — it will happily pass a nonexistent model — so
+   the catalog check is not optional.
+
+   If either check fails, do not launch. List the real IDs and pick the closest
+   match:
+   ```bash
+   node -e "
+   const s=require(process.env.HOME+'/.pi/agent/models-store.json');
+   for (const [prov, v] of Object.entries(s))
+     for (const m of v.models||[]) console.log(prov+'/'+(m.id||m.name));
+   " | grep -iE '<pattern>'
+   ```
+   Configured providers are the keys of `~/.pi/agent/auth.json`; a provider
+   missing from that file reports `invalid` regardless of model ID. Report the
+   correction to the user rather than silently substituting a different model
+   than they asked for.
 
 2. **Determine the range** when none was provided (the default — review the
    current branch):
@@ -79,15 +127,24 @@ Prefer to use the openrouter provider, when available there.
 
 3. **Generate the diff.** Run:
    ```bash
-   git diff <RANGE>
+   git diff <RANGE> --stat
    ```
-   If the diff is empty, try `git diff <RANGE> --stat` to confirm the range is
-   valid, and inform the user.
+   If the diff is empty, confirm the range is valid and inform the user.
 
-4. **Save the diff** to a temp file (unique per run):
+4. **Save the diff** to a temp file (unique per run), excluding generated files
+   so lockfile churn doesn't crowd out the real changes (a dependency bump can
+   easily add thousands of `yarn.lock` lines and bury the diff, or blow the
+   reviewer's context entirely):
    ```bash
-   git diff <RANGE> > /tmp/pi-review-diff-$REVIEW_ID.md
+   git diff <RANGE> -- . \
+     ':(exclude)yarn.lock' ':(exclude)package-lock.json' \
+     ':(exclude)pnpm-lock.yaml' ':(exclude)bun.lockb' \
+     ':(exclude)*.snap' ':(exclude)**/generated/**' \
+     > /tmp/pi-review-diff-$REVIEW_ID.md
    ```
+   Mention any exclusions in the reviewer prompt so it knows the omission is
+   deliberate and doesn't flag it as missing context. If a lockfile itself is
+   the point of the review, keep it and say so.
 
 5. **Run the reviewer subagent in a live tmux pane.** Write the prompt and a
    tiny runner script to temp files (this avoids nested-quoting problems when
@@ -171,8 +228,12 @@ Prefer to use the openrouter provider, when available there.
 
 ## Notes
 
-- The default reviewer model is `anthropic/claude-opus-4-8`, used for deep code
-  analysis. Override it per-invocation with `--model`.
+- The default reviewer model is `openrouter/anthropic/claude-opus-5`, used for
+  deep code analysis. Override it per-invocation with `--model`.
+- Model IDs in the alias table go stale as models ship and retire. Step 1b
+  verifies the resolved ID with `pi auth check` before launching, because a bad
+  ID otherwise fails silently inside the tmux pane and the agent just blocks on
+  the done-file until it times out.
 - Inside tmux, the subagent runs the **full interactive `pi` TUI** (not
   `--print`), so the user sees its live progress — thinking, tool calls, file
   reads — stream in the pane. Outside tmux it falls back to non-interactive
