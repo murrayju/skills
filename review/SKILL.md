@@ -35,14 +35,15 @@ unchanged:
 | Alias                           | Full ID                                 |
 | ------------------------------- | --------------------------------------- |
 | `fable`, `fable-5`              | `openrouter/anthropic/claude-fable-5.1` |
-| `opus`, `opus-5`                | `openrouter/anthropic/claude-opus-5`    |
-| `gpt`, `gpt-5.6`, `gpt-5.6-sol` | `openrouter/openai/gpt-5.6-sol`         |
+| `opus`, `opus-5`                | `openrouter/anthropic/claude-opus-5.5`  |
+| `gpt`, `sol`                    | `openrouter/openai/gpt-6-sol`           |
+| `astra`                         | `openrouter/openai/gpt-6-astra`         |
 | `gemini`                        | `openrouter/google/gemini-3.8-flash`    |
 | `glm`                           | `openrouter/z-ai/glm-5.3`               |
 | `kimi`                          | `openrouter/moonshotai/kimi-k3`         |
 | `deepseek`                      | `openrouter/deepseek/deepseek-v4-pro`   |
 | `minimax`                       | `openrouter/minimax/minimax-m3`         |
-| `grok`                          | `openrouter/x-ai/grok-4.6`              |
+| `grok`                          | `openrouter/x-ai/grok-4.7`              |
 
 Prefer to use the openrouter provider, when available there.
 
