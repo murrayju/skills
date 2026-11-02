@@ -71,9 +71,11 @@ T=POP-1234; BASE=<previous ticket branch, or main for the first>
 3. **Start the implementer.** `$S/start-ticket.sh $T $BASE "<ticket-specific guidance>"`.
    Give specific guidance: the risky call sites, what to characterize before the change, the prerequisites
    that earlier tickets in the stack already provide, and what not to do (out-of-scope follow-ups).
-4. **Wait.** `$S/wait-done.sh $T` (prints progress every 5 minutes; returns exit code 3 on its own time
-   limit, so call it again). Large tickets take 1 to 3 hours. Wait with long bash timeouts (about
-   3500 s) and loop. Do not poll every minute.
+4. **Wait.** `$S/wait-done.sh $T`. It prints progress every 5 minutes. Exit codes: 0 done; 3 its own
+   time limit (call it again); 5 the agent is idle without the signal file (it stopped early: an API
+   error, a question, or a BLOCKED report; the script shows its screen); 1 the pane closed (pi exited).
+   Large tickets take 1 to 3 hours. Wait with long bash timeouts (about 3500 s) and loop. Do not poll
+   every minute.
 5. **Validate.** Read `$STACK_WORK/$T-report.md`. Check `git status` (clean), `git log --format='%h %G? %s'
    $BASE..HEAD` (all commits signed: `G`), and look at the key production diffs yourself. Look for
    left-over secrets: `find $STACK_WORK /tmp -name '*env*'`.
@@ -98,7 +100,8 @@ T=POP-1234; BASE=<previous ticket branch, or main for the first>
     `## follow-ups`).
 11. **CI until green.** `$S/wait-pr.sh <PR> 80`. On a failure, see "CI failures". Do not move on while
     any check is red.
-12. **Close out.** `$S/close-panes.sh`, mark the ticket done in `ORDER.txt`, and start the next ticket with
+12. **Close out.** `$S/close-panes.sh $T` (closes only the panes that this run recorded for the ticket;
+    never close the user's own panes), mark the ticket done in `ORDER.txt`, and start the next ticket with
     `BASE` = this ticket's branch.
 
 If a ticket needs no change after investigation (tracking tickets, still blocked upstream), let the subagent
@@ -126,19 +129,32 @@ Check the commit statuses of recent `main` commits to see if a check is already 
 
 ## herdr + pi: what works
 
-- Start an agent: `herdr pane split --pane "$HERDR_PANE_ID" --direction right --cwd <repo> --no-focus`, then
-  `herdr agent start <name> --kind pi --pane <id> -- --model <provider/model> --thinking high`.
-- **Target agents by pane id, not by name.** herdr loses agent names (`agent_not_found`) after pi reports its
-  session. Pane ids stay stable.
-- `herdr agent prompt` needs `--wait` before `--timeout`. A rejected prompt is not delivered. Use
-  `prompt.sh`, which tries again until the agent is `working`.
+- **Start pi with its first prompt as a positional message** (the method of the `review` skill):
+  `herdr pane split --pane "$HERDR_PANE_ID" --direction right --cwd <repo> --no-focus`, write a runner
+  script `exec pi --model <provider/model> --thinking high "$(cat <prompt file>)"`, then
+  `herdr pane run <pane> "exec <runner>"`. `launch_pi` in `common.sh` does this. The first prompt cannot
+  get lost, the command line stays short, and the pane closes when pi exits. herdr still detects pi in the
+  pane, so `herdr agent prompt <pane>` works for later rounds.
+- Do not use `herdr agent start` + an immediate `herdr agent prompt` for the first prompt: right after a
+  start, prompts were rejected (`agent_not_found`, `agent_prompt_stalled`), and a rejected prompt is not
+  delivered.
+- **Target agents by pane id, not by name.** herdr loses agent names (`agent_not_found`). Pane ids stay
+  stable.
+- For later prompts, `herdr agent prompt` needs `--wait` before `--timeout`. Use `prompt.sh`, which tries
+  again until the agent is `working`.
 - Do not trust herdr status alone. It can stay `working` long after the agent stopped, or show `done` before
   the last file writes. Use signal files plus a stable status (`wait-done.sh`).
-- To see what a busy agent does: `herdr agent read <pane> --source visible`, or read its pi session JSONL
-  (`herdr agent get <pane> | jq -r .result.agent.agent_session.value`). Long `--lines` reads fail while the
-  agent works.
-- If a pane shows `Model "..." not found`, pi did not start. Check `pi auth check --provider <p> --model <m>`
-  (it only checks the provider) and `pi --list-models <m>` (it checks the model).
+- A closed pane: `herdr pane get` fails with error code `pane_not_found`. Other herdr errors can be short
+  failures, so count a pane as closed only after 3 `pane_not_found` results in a row (`pane_gone` in
+  `common.sh`).
+- To see what an agent does: `herdr pane read <pane> --source visible` (or `recent-unwrapped --lines 80`;
+  `pane read` works while pi is busy, but `herdr agent read` with `--lines` fails then). For tool-call
+  detail, read its pi session JSONL (`herdr pane get <pane> | jq -r .result.pane.agent_session.value`).
+- **A bad model id does not make pi exit.** pi shows the API error (`model_not_found`) and stays idle.
+  `wait_working` catches it from the screen. Before a run, check models with `pi auth check --provider
+  <p> --model <m>` (it only checks the provider) and `pi --list-models <m>` (it checks the model);
+  `preflight.sh` does both.
+- Only close the panes you made. The user can have panes of their own in the same workspace.
 
 ## Pitfalls (each one cost time before)
 

@@ -39,7 +39,7 @@ Arguments (any order, all optional):
 
 - **`--model <name>` / `-m <name>`** — the reviewer model. Accepts a short
   alias or a full `provider/model` ID. Defaults to
-  `openrouter/anthropic/claude-opus-5`.
+  `openrouter/anthropic/claude-opus-5.5` (the `opus` alias).
 - **Any other argument** — a git revision range. If omitted, defaults to the
   current branch (see below).
 
@@ -76,7 +76,7 @@ launching** (step 1b) rather than trusting this table.
 1. **Parse the arguments.**
    - Extract the reviewer model from `--model`/`-m` if present, resolving
      aliases via the table above. Otherwise use
-     `openrouter/anthropic/claude-opus-5`.
+     `openrouter/anthropic/claude-opus-5.5` (the `opus` alias).
    - Treat any remaining non-flag argument as the git revision `RANGE`.
    - **Generate a unique run ID** so parallel reviews never clash on shared
      `/tmp` paths. Use it as `REVIEW_ID` in every temp filename below:
@@ -166,8 +166,10 @@ launching** (step 1b) rather than trusting this table.
 5. **Run the reviewer subagent in a live herdr or tmux pane.** Write the prompt and a
    tiny runner script to temp files (this avoids nested-quoting problems when
    the prompt is long), then launch the full `pi` TUI in a detached split pane
-   the user can watch in real time, and block until the reviewer signals it is
-   done.
+   the user can watch in real time. Launching and waiting are two separate
+   bash calls (step 5b): a review can take 10 to 30 minutes or more, and a
+   wait that is a separate call can be started again if a bash timeout stops
+   it.
 
    First write the prompt (note the diff path includes the run ID). The prompt
    tells the reviewer to write its report to the output file and then create a
@@ -175,7 +177,7 @@ launching** (step 1b) rather than trusting this table.
    instead of scraping stdout:
    ```bash
    cat > /tmp/pi-review-prompt-$REVIEW_ID.txt <<EOF
-   You are a senior engineer reviewing a code diff. The diff is at /tmp/pi-review-diff-$REVIEW_ID.md. Read it, then review it focusing ONLY on bugs, logic errors, security issues, missed edge cases, and opportunities to simplify/DRY the code. You have full access to the repository in the current working directory — read related files, trace callers, and run git commands as needed to understand the change in context. Do NOT comment on style, naming, or minor preferences. For each finding, cite the file and line, explain the issue, and suggest a fix. Your report should be a numbered list, or say 'No issues found' if the code is clean.
+   You are a senior engineer reviewing a code diff. The diff is at /tmp/pi-review-diff-$REVIEW_ID.md. Read it, then review it focusing ONLY on bugs, logic errors, security issues, missed edge cases, and opportunities to simplify/DRY the code. You have full access to the repository in the current working directory: read related files, trace callers, and run git commands as needed to understand the change in context. Do NOT modify repository files. Do NOT spawn subagents or start another review. Do NOT comment on style, naming, or minor preferences. For each finding, cite the file and line, explain the issue, give a severity (high/medium/low), and suggest a fix. Your report should be a numbered list, or say 'No issues found' if the code is clean. In both cases, append a short 'What I checked' section: the files you read, the callers you traced, and the commands or tests you ran.
 
    IMPORTANT — how to deliver your report: do NOT just print it to the screen. When your review is complete, WRITE the full report to the file /tmp/pi-review-output-$REVIEW_ID.md using your file-writing tool. Then, as your VERY LAST action, create an empty signal file by running: touch /tmp/pi-review-done-$REVIEW_ID. Only create the done-file after the report file has been fully written.
    EOF
@@ -202,6 +204,9 @@ launching** (step 1b) rather than trusting this table.
    chmod +x /tmp/pi-review-run-$REVIEW_ID.sh
    rm -f /tmp/pi-review-output-$REVIEW_ID.md /tmp/pi-review-done-$REVIEW_ID
 
+   # This step only launches the reviewer. It prints REVIEW_ID and
+   # REVIEW_PANE. Shell variables do not persist between bash calls, so copy
+   # both values into the wait command of step 5b.
    if [ "${HERDR_ENV:-}" = 1 ]; then
      # Running inside herdr. Split the agent's own pane (--current resolves
      # to $HERDR_PANE_ID), not the pane that has UI focus. --no-focus keeps
@@ -222,15 +227,7 @@ launching** (step 1b) rather than trusting this table.
      # command line longer than the terminal input limit. The runner script
      # reads the long prompt from its file, so the command stays short.
      herdr pane run "$REVIEW_PANE" "exec /tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
-     echo "Reviewer running in herdr pane $REVIEW_PANE"
-     # Block until the done-file appears. Also stop if the pane closes: with
-     # "exec", the pane closes when pi exits, so a closed pane without a
-     # done-file means pi quit before it finished the review.
-     while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do
-       herdr pane get "$REVIEW_PANE" >/dev/null 2>&1 || { echo "Reviewer pane closed before the review finished"; break; }
-       sleep 2
-     done
-     [ -f /tmp/pi-review-done-$REVIEW_ID ] && echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
+     echo "REVIEW_ID=$REVIEW_ID REVIEW_PANE=$REVIEW_PANE (herdr)"
    elif [ -n "$TMUX" ]; then
      # Running inside tmux: spawn a detached split pane (-d keeps the agent's
      # pane focused) so the user watches the live pi TUI without losing focus
@@ -252,44 +249,83 @@ launching** (step 1b) rather than trusting this table.
      PANE_W=$(tmux display-message -t "$AGENT_PANE" -p '#{pane_width}')
      PANE_H=$(tmux display-message -t "$AGENT_PANE" -p '#{pane_height}')
      if [ "$PANE_W" -gt "$((PANE_H * 2))" ]; then SPLIT_DIR=-h; else SPLIT_DIR=-v; fi
-     tmux split-window "$SPLIT_DIR" -d -t "$AGENT_PANE" "/tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
-     # Block until the subagent signals completion via the run-specific done-file.
-     while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do sleep 2; done
-     echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
+     # -P -F prints the ID of the new pane, so that step 5b can check it.
+     REVIEW_PANE=$(tmux split-window "$SPLIT_DIR" -d -P -F '#{pane_id}' -t "$AGENT_PANE" "/tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'")
+     echo "REVIEW_ID=$REVIEW_ID REVIEW_PANE=$REVIEW_PANE (tmux)"
    else
      # Not in herdr or tmux: fall back to a non-interactive --print run. Interactive pi
      # expects a real TTY and never auto-exits after the first message, so the
      # agent's bash call would hang. -p/--print processes the prompt and exits;
      # the reviewer still writes its report to the output file and creates the
      # done-file as usual.
+     # This run is synchronous: when it returns, the review is done. Skip
+     # step 5b.
      pi --model '<REVIEWER_MODEL>' -p "$(cat /tmp/pi-review-prompt-$REVIEW_ID.txt)"
    fi
    ```
-   The pane shows the live pi interface and stays open afterward. The agent
-   unblocks as soon as the done-file appears and reads the full review from
-   `/tmp/pi-review-output-$REVIEW_ID.md`.
+   The pane shows the live pi interface and stays open afterward.
 
-   **herdr only: diagnose a stuck review.** If the wait seems stuck (for
-   example, you ran the launch with a bash timeout and it expired), read the
-   reviewer pane instead of waiting blindly. Use the pane ID that the launch
-   printed (shell variables do not persist between bash calls):
+5b. **Wait for the report (herdr and tmux).** Run this as its own bash call,
+   with a long bash timeout (about 3600 s). Fill in the two values that step 5
+   printed. If the call stops at its deadline or at a bash timeout, run it
+   again: it continues to wait for the same review.
+   ```bash
+   REVIEW_ID=<REVIEW_ID>; REVIEW_PANE=<REVIEW_PANE>
+   DONE=/tmp/pi-review-done-$REVIEW_ID
+   DEADLINE=$(( $(date +%s) + 3300 ))
+   MISSES=0
+   # Check that the pane is still there. With "exec", the pane closes when pi
+   # exits, so a closed pane without a done-file means pi quit before it
+   # finished the review. A herdr call can fail for a short time, so accept
+   # only "pane_not_found", 3 times in a row, as a closed pane.
+   pane_gone() {
+     if [ "${REVIEW_PANE#%}" != "$REVIEW_PANE" ]; then
+       ! tmux display-message -t "$REVIEW_PANE" -p '#{pane_id}' >/dev/null 2>&1
+     else
+       herdr pane get "$REVIEW_PANE" 2>&1 >/dev/null | grep -q pane_not_found
+     fi
+   }
+   while [ ! -f "$DONE" ] && [ "$(date +%s)" -lt "$DEADLINE" ]; do
+     if pane_gone; then MISSES=$((MISSES + 1)); else MISSES=0; fi
+     [ "$MISSES" -ge 3 ] && { echo "Reviewer pane closed before the review finished"; break; }
+     sleep 5
+   done
+   if [ -f "$DONE" ]; then
+     echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
+   elif [ "$MISSES" -lt 3 ]; then
+     echo "Still running at the deadline. Run this step again."
+   fi
+   ```
+
+   **Diagnose a stuck review.** If the review seems stuck, look at the
+   reviewer instead of waiting blindly. In herdr, read the pane. This works
+   while pi is busy (only `herdr agent read` with `--lines` fails then):
    ```bash
    herdr pane read <REVIEW_PANE> --source recent-unwrapped --lines 80
    ```
-   This shows errors and approval dialogs. Report what you see to the user. Do
-   not answer reviewer dialogs or close the pane without the user's consent.
-   If the loop reports that the pane closed, pi exited without a report (the
-   user quit it, or it crashed). Tell the user. Do not relaunch automatically.
-   In tmux there is no equivalent read step in this skill, so ask the user to
-   look at the pane.
+   This shows errors and approval dialogs. herdr also detects pi in the pane,
+   so you can follow its tool calls in its pi session log:
+   ```bash
+   herdr pane get <REVIEW_PANE> | jq -r '.result.pane.agent_session.value'   # a .jsonl file
+   ```
+   Report what you see to the user. Do not answer reviewer dialogs or close
+   the pane without the user's consent. If the wait reports that the pane
+   closed, pi exited without a report (the user quit it, or it crashed). Tell
+   the user. Do not relaunch automatically. In tmux there is no equivalent
+   read step in this skill, so ask the user to look at the pane.
+
+   If the report says "No issues found" and has no "What I checked" section,
+   be careful with it. Ask the reviewer (in its pane) what it checked before
+   you rely on it.
 
 6. **Present the findings** (read them from `/tmp/pi-review-output-$REVIEW_ID.md`) to the user, then ask whether they'd like you to
    address any of them.
 
 ## Notes
 
-- The default reviewer model is `openrouter/anthropic/claude-opus-5`, used for
-  deep code analysis. Override it per-invocation with `--model`.
+- The default reviewer model is `openrouter/anthropic/claude-opus-5.5` (the
+  `opus` alias), used for deep code analysis. Override it per-invocation with
+  `--model`.
 - Model IDs in the alias table go stale as models ship and retire. Step 1b
   verifies the resolved ID with `pi auth check` before launching, because a bad
   ID otherwise fails silently inside the herdr/tmux pane and the agent just blocks on
@@ -316,8 +352,8 @@ launching** (step 1b) rather than trusting this table.
   until the reviewer writes its done-file, then reads the report from
   `/tmp/pi-review-output-$REVIEW_ID.md`. Because it is the real interactive
   interface, the pane stays open after the review for the user to scroll, ask
-  follow-ups, or close themselves. Outside tmux there is no pane to watch, so
-  the reviewer runs non-interactively via `-p`/`--print` (the interactive TUI
+  follow-ups, or close themselves. Outside herdr and tmux there is no pane to
+  watch, so the reviewer runs non-interactively via `-p`/`--print` (the interactive TUI
   expects a real TTY and never auto-exits after the first message, which would
   hang the agent's bash call); the reviewer still writes its report to the
   output file and creates the done-file.

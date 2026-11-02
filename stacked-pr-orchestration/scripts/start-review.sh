@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: start-review.sh <TICKET> <BASE_REF>
 # Start the second-opinion reviewer (REVIEWER_MODEL) in a pane below the
-# ticket pane. It reviews BASE_REF...HEAD and writes a report file.
+# ticket pane, the same way as the review skill. It reviews BASE_REF...HEAD and writes a report file.
 # Start it only after the implementer is done: an empty diff wastes a review.
 source "$(dirname "$0")/common.sh"
 set -euo pipefail
@@ -19,7 +19,8 @@ P
 TICKET_PANE=$(read_file "$STACK_WORK/$TICKET-pane")
 PANE=$(herdr pane split --pane "$TICKET_PANE" --direction down --cwd "$REPO" --no-focus | jq -r .result.pane.pane_id)
 echo "$PANE" > "$STACK_WORK/$TICKET-review-pane"
-herdr agent start "rev-${TICKET,,}" --kind pi --pane "$PANE" --timeout 120000 -- --model "$REVIEWER_MODEL" --thinking "$THINKING" >/dev/null || true
-"$SKILL_SCRIPTS/prompt.sh" "$PANE" "@$R/$ID-prompt.txt" >/dev/null
 echo "$ID" > "$STACK_WORK/$TICKET-review-id"
+# The same launch as the review skill: pi with the prompt as its first message.
+launch_pi "$PANE" "$REVIEWER_MODEL" "$R/$ID-prompt.txt"
+wait_working "$PANE" || exit 1
 echo "$ID"

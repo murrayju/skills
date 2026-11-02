@@ -9,9 +9,23 @@ source "$(dirname "$0")/common.sh"
 TICKET="$1"; SIGNAL="${2:-done}"; MAX="${3:-55}"
 PANE=$(read_file "$STACK_WORK/$TICKET-pane") || exit 1
 DONE="$STACK_WORK/$TICKET-$SIGNAL"
-start=$(date +%s); stable=0; last=0
+start=$(date +%s); stable=0; last=0; misses=0; idle=0
 while [ $(( $(date +%s) - start )) -lt $(( MAX * 60 )) ]; do
-  S=$(herdr agent get "$PANE" 2>/dev/null | jq -r '.result.agent.agent_status // "gone"')
+  # pi runs with "exec", so the pane closes when pi exits. A closed pane
+  # counts only after 3 checks in a row.
+  if pane_gone "$PANE"; then misses=$((misses + 1)); else misses=0; fi
+  if [ "$misses" -ge 3 ]; then
+    echo "pane $PANE closed: pi exited"; git log --oneline -5; git status --short | head; exit 1
+  fi
+  S=$(herdr pane get "$PANE" 2>/dev/null | jq -r '.result.pane.agent_status // "unknown"')
+  # An agent that is idle for 3 minutes without the signal file stopped
+  # early (an API error, a question, or a "BLOCKED" report). Show its screen.
+  if [ ! -f "$DONE" ] && [[ "$S" =~ ^(idle|done|blocked)$ ]]; then idle=$((idle + 1)); else idle=0; fi
+  if [ "$idle" -ge 18 ]; then
+    echo "agent in $PANE is $S without $DONE. Its screen:"
+    herdr pane read "$PANE" --source visible | grep -v '^\s*$' | tail -15
+    exit 5
+  fi
   if [ -f "$DONE" ]; then
     if [ "$S" != working ]; then stable=$((stable + 1)); else stable=0; fi
     # Accept a stuck "working" status 3 minutes after the signal.
