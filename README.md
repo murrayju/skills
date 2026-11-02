@@ -15,6 +15,13 @@ loads when the skill is invoked.
   Invoke via `/skill:review`, `/skill:review main..HEAD`, or
   `/skill:review --model gpt-5.5`.
 
+- **stacked-pr-orchestration**: Work through a series of tickets (for example
+  the sub-issues of a Linear epic) as a stack of green PRs. The agent stays the
+  orchestrator: each ticket gets a fresh pi subagent in a herdr pane, a
+  second-opinion review by another model, a stacked PR, and the automated
+  review and CI loop until green. Includes helper scripts and a subagent brief
+  template.
+
 ## Usage
 
 Clone this repo into your pi skills directory:
