@@ -5,9 +5,25 @@ description: Run a focused code review using a stronger subagent model. By defau
 
 # Code Review via Subagent
 
-Launches the full `pi` interface (`pi --model <REVIEWER_MODEL>`) in a live tmux
-pane to get a second opinion on code changes from a stronger model. The
-reviewer writes its report to a file so the agent never has to scrape stdout.
+Launches the full `pi` interface (`pi --model <REVIEWER_MODEL>`) in a live
+multiplexer pane (herdr or tmux) to get a second opinion on code changes from a
+stronger model. The reviewer writes its report to a file so the agent never has
+to scrape stdout.
+
+### Multiplexer detection
+
+Step 5 picks a launch mode from the environment, in this order:
+
+| Check                    | Mode                                                     |
+| ------------------------ | -------------------------------------------------------- |
+| `"$HERDR_ENV" = 1`       | herdr: split the agent's herdr pane (`$HERDR_PANE_ID`)   |
+| `-n "$TMUX"`             | tmux: split the agent's tmux pane (`$TMUX_PANE`)         |
+| neither                  | no pane: non-interactive `pi -p` in the agent's own shell |
+
+herdr wins when both are set, because herdr injects `HERDR_ENV` and
+`HERDR_PANE_ID` into the exact pane the agent runs in. For more herdr detail
+(IDs, JSON output, safety rules), see the separate `herdr` skill. This skill
+only needs the commands in step 5.
 
 ## Usage
 
@@ -72,8 +88,8 @@ launching** (step 1b) rather than trusting this table.
      ID when you run the commands.
 
 1b. **Verify the model resolves before launching.** A bad model ID fails inside
-   the tmux pane, where the error is invisible to the agent — it just blocks on
-   the done-file until it times out. Always check first.
+   the herdr/tmux pane, where the error is invisible to the agent. The agent
+   just blocks on the done-file until it times out. Always check first.
 
    Split the resolved ID on its *first* `/` into pi provider + model, then
    confirm **both** that the provider is authenticated and that the model
@@ -147,7 +163,7 @@ launching** (step 1b) rather than trusting this table.
    deliberate and doesn't flag it as missing context. If a lockfile itself is
    the point of the review, keep it and say so.
 
-5. **Run the reviewer subagent in a live tmux pane.** Write the prompt and a
+5. **Run the reviewer subagent in a live herdr or tmux pane.** Write the prompt and a
    tiny runner script to temp files (this avoids nested-quoting problems when
    the prompt is long), then launch the full `pi` TUI in a detached split pane
    the user can watch in real time, and block until the reviewer signals it is
@@ -186,7 +202,36 @@ launching** (step 1b) rather than trusting this table.
    chmod +x /tmp/pi-review-run-$REVIEW_ID.sh
    rm -f /tmp/pi-review-output-$REVIEW_ID.md /tmp/pi-review-done-$REVIEW_ID
 
-   if [ -n "$TMUX" ]; then
+   if [ "${HERDR_ENV:-}" = 1 ]; then
+     # Running inside herdr. Split the agent's own pane (--current resolves
+     # to $HERDR_PANE_ID), not the pane that has UI focus. --no-focus keeps
+     # the user's focus on this agent. --cwd keeps the reviewer in the repo.
+     #
+     # herdr splits only "right" or "down". Use the same aspect-ratio rule as
+     # tmux below: cells are about twice as tall as wide.
+     read -r PANE_W PANE_H < <(herdr pane layout --current \
+       | jq -r --arg pane "$HERDR_PANE_ID" \
+         '.result.layout.panes[] | select(.pane_id == $pane) | "\(.rect.width) \(.rect.height)"')
+     if [ "$PANE_W" -gt "$((PANE_H * 2))" ]; then SPLIT_DIR=right; else SPLIT_DIR=down; fi
+     # Read the new pane ID from the JSON response. Do not guess it.
+     REVIEW_PANE=$(herdr pane split --current --direction "$SPLIT_DIR" \
+       --cwd "$PWD" --no-focus | jq -r '.result.pane.pane_id')
+     # The new pane starts a shell. "pane run" types the command and Enter.
+     # "exec" replaces the shell, so the pane closes when the user quits pi
+     # (the same as tmux). Keep the command short: on macOS herdr rejects a
+     # command line longer than the terminal input limit. The runner script
+     # reads the long prompt from its file, so the command stays short.
+     herdr pane run "$REVIEW_PANE" "exec /tmp/pi-review-run-$REVIEW_ID.sh '<REVIEWER_MODEL>' '$REVIEW_ID'"
+     echo "Reviewer running in herdr pane $REVIEW_PANE"
+     # Block until the done-file appears. Also stop if the pane closes: with
+     # "exec", the pane closes when pi exits, so a closed pane without a
+     # done-file means pi quit before it finished the review.
+     while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do
+       herdr pane get "$REVIEW_PANE" >/dev/null 2>&1 || { echo "Reviewer pane closed before the review finished"; break; }
+       sleep 2
+     done
+     [ -f /tmp/pi-review-done-$REVIEW_ID ] && echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
+   elif [ -n "$TMUX" ]; then
      # Running inside tmux: spawn a detached split pane (-d keeps the agent's
      # pane focused) so the user watches the live pi TUI without losing focus
      # on the conversation with this agent.
@@ -212,7 +257,7 @@ launching** (step 1b) rather than trusting this table.
      while [ ! -f /tmp/pi-review-done-$REVIEW_ID ]; do sleep 2; done
      echo "Reviewer finished; report written to /tmp/pi-review-output-$REVIEW_ID.md"
    else
-     # Not in tmux: fall back to a non-interactive --print run. Interactive pi
+     # Not in herdr or tmux: fall back to a non-interactive --print run. Interactive pi
      # expects a real TTY and never auto-exits after the first message, so the
      # agent's bash call would hang. -p/--print processes the prompt and exits;
      # the reviewer still writes its report to the output file and creates the
@@ -224,6 +269,20 @@ launching** (step 1b) rather than trusting this table.
    unblocks as soon as the done-file appears and reads the full review from
    `/tmp/pi-review-output-$REVIEW_ID.md`.
 
+   **herdr only: diagnose a stuck review.** If the wait seems stuck (for
+   example, you ran the launch with a bash timeout and it expired), read the
+   reviewer pane instead of waiting blindly. Use the pane ID that the launch
+   printed (shell variables do not persist between bash calls):
+   ```bash
+   herdr pane read <REVIEW_PANE> --source recent-unwrapped --lines 80
+   ```
+   This shows errors and approval dialogs. Report what you see to the user. Do
+   not answer reviewer dialogs or close the pane without the user's consent.
+   If the loop reports that the pane closed, pi exited without a report (the
+   user quit it, or it crashed). Tell the user. Do not relaunch automatically.
+   In tmux there is no equivalent read step in this skill, so ask the user to
+   look at the pane.
+
 6. **Present the findings** (read them from `/tmp/pi-review-output-$REVIEW_ID.md`) to the user, then ask whether they'd like you to
    address any of them.
 
@@ -233,11 +292,11 @@ launching** (step 1b) rather than trusting this table.
   deep code analysis. Override it per-invocation with `--model`.
 - Model IDs in the alias table go stale as models ship and retire. Step 1b
   verifies the resolved ID with `pi auth check` before launching, because a bad
-  ID otherwise fails silently inside the tmux pane and the agent just blocks on
+  ID otherwise fails silently inside the herdr/tmux pane and the agent just blocks on
   the done-file until it times out.
-- Inside tmux, the subagent runs the **full interactive `pi` TUI** (not
-  `--print`), so the user sees its live progress — thinking, tool calls, file
-  reads — stream in the pane. Outside tmux it falls back to non-interactive
+- Inside herdr or tmux, the subagent runs the **full interactive `pi` TUI** (not
+  `--print`), so the user sees its live progress (thinking, tool calls, file
+  reads) stream in the pane. Outside both it falls back to non-interactive
   `-p`/`--print` mode (see below). The reviewer is instructed to write its report to
   `/tmp/pi-review-output-$REVIEW_ID.md` and then `touch` a done-file as its
   final action; the agent never scrapes stdout.
@@ -262,6 +321,18 @@ launching** (step 1b) rather than trusting this table.
   expects a real TTY and never auto-exits after the first message, which would
   hang the agent's bash call); the reviewer still writes its report to the
   output file and creates the done-file.
+- Inside herdr, the behavior matches tmux with these differences. The split
+  targets the agent's own pane via `--current` (`$HERDR_PANE_ID`). The split
+  direction is `right` or `down` (herdr's names for tmux `-h` and `-v`).
+  `--no-focus` keeps the user's focus on this agent. The new pane starts a
+  shell, and `herdr pane run` sends `exec <runner>` to it, so the pane closes
+  when the user quits pi (the same as tmux). Do not close the pane from the
+  agent: the user owns it after the review. The agent can read the pane with
+  `herdr pane read` to diagnose a stuck review. The herdr path needs `jq` to
+  parse herdr's JSON output.
+- The reviewer uses `pi` through a plain pane (`herdr pane run`), not
+  `herdr agent start` / `herdr agent prompt`. The done-file protocol already
+  signals completion in all three modes, so one mechanism covers all of them.
 - The subagent runs in the current working directory and has full tool access,
   so it can read any file, trace callers, and run git commands to understand
   the change in its broader context — it is not limited to the diff alone.
