@@ -7,19 +7,27 @@ fi
 # shellcheck disable=SC1091
 source "$STACK_WORK/config.env"
 SKILL_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The tools of the pi-advisor extension. Give "--exclude-tools $ADVISOR_TOOLS"
+# to pi to run it without the Advisor. All Advisor paths need ask_advisor.
+ADVISOR_TOOLS="ask_advisor,record_advisor_outcome"
 cd "$REPO" || exit 2
 
 # Start pi in a pane, with the content of PROMPT_FILE as its first message.
 # This is the method of the review skill: a runner script that "exec"s pi with
 # a positional message. The first prompt cannot get lost (an "agent prompt"
 # right after a start can), and the pane closes when pi exits.
-# Usage: launch_pi <PANE> <MODEL> <PROMPT_FILE>
+# Give more pi arguments after PROMPT_FILE, for example
+# --exclude-tools "$ADVISOR_TOOLS" to start pi without the Advisor.
+# Usage: launch_pi <PANE> <MODEL> <PROMPT_FILE> [PI_ARG...]
 launch_pi() {
   local pane="$1" model="$2" prompt_file="$3"
-  local runner="${prompt_file%.*}-run.sh"
+  shift 3
+  local runner="${prompt_file%.*}-run.sh" extra_args=""
+  # Quote each argument for the runner script.
+  [ "$#" -gt 0 ] && extra_args=$(printf ' %q' "$@")
   cat > "$runner" <<RUN
 #!/usr/bin/env bash
-exec pi --model "$model" --thinking "$THINKING" "\$(cat '$prompt_file')"
+exec pi --model "$model" --thinking "$THINKING"$extra_args "\$(cat '$prompt_file')"
 RUN
   chmod +x "$runner"
   # Keep the command short. The runner reads the long prompt from its file.

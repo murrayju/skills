@@ -22,7 +22,10 @@ Do NOT push, do NOT create PRs, do NOT switch branches. The correct branch is al
   it, and flag it in the PR description under "Open questions / decisions".
 - If part of the ticket is impossible now (blocked upstream, needs infra), do what you can, document the rest, and
   explain it in the report. Do not silently skip "Done when" items.
-- Do not spawn subagents unless the work is very large and obviously parallel.
+- Do not spawn subagents unless the work is very large and obviously parallel. If you do, start them with your
+  own model (not the AGENTS.md default), so they also get the Advisor.
+- You have an Advisor (`ask_advisor`, a stronger model). Use it for consequential decisions, repeated failures,
+  and a final review before you write the report. It gives advice only: you still own and verify the work.
 - Long-running commands can get SIGHUP (exit code 129). Run them detached:
   `nohup setsid bash -c '<cmd> > <log> 2>&1; echo $? > <exitfile>' &` and poll the exit file.
 - If a build needs extra local env values (for example in a git-ignored `.env`), restore the file exactly when

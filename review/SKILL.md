@@ -1,6 +1,6 @@
 ---
 name: review
-description: Run a focused code review using a stronger subagent model. By default reviews the current branch (all commits since it diverged from the default branch) for bugs, logic errors, security issues, and missed edge cases. Supports a custom revision range and a selectable reviewer model. Invoke via /skill:review, /skill:review main..HEAD, or /skill:review --model gpt-5.5.
+description: Run a focused code review using a stronger subagent model, with no Advisor. By default reviews the current branch (all commits since it diverged from the default branch) for bugs, logic errors, security issues, and missed edge cases. Supports a custom revision range and a selectable reviewer model. Invoke via /skill:review, /skill:review main..HEAD, or /skill:review --model gpt-5.5.
 ---
 
 # Code Review via Subagent
@@ -9,6 +9,14 @@ Launches the full `pi` interface (`pi --model <REVIEWER_MODEL>`) in a live
 multiplexer pane (herdr or tmux) to get a second opinion on code changes from a
 stronger model. The reviewer writes its report to a file so the agent never has
 to scrape stdout.
+
+The reviewer uses ONLY the selected model. Every `pi` launch below passes
+`--exclude-tools ask_advisor,record_advisor_outcome`, so the pi-advisor
+extension cannot consult a second model (no `ask_advisor` tool, no Advisor
+prompt rules, no automatic gates). All Advisor paths check that `ask_advisor`
+is active, and an excluded tool never registers, so the global
+`advisorToolsEnabled` setting cannot add it back. The prompt also forbids
+subagents. Keep both when you edit this skill.
 
 ### Multiplexer detection
 
@@ -177,7 +185,7 @@ launching** (step 1b) rather than trusting this table.
    instead of scraping stdout:
    ```bash
    cat > /tmp/pi-review-prompt-$REVIEW_ID.txt <<EOF
-   You are a senior engineer reviewing a code diff. The diff is at /tmp/pi-review-diff-$REVIEW_ID.md. Read it, then review it focusing ONLY on bugs, logic errors, security issues, missed edge cases, and opportunities to simplify/DRY the code. You have full access to the repository in the current working directory: read related files, trace callers, and run git commands as needed to understand the change in context. Do NOT modify repository files. Do NOT spawn subagents or start another review. Do NOT comment on style, naming, or minor preferences. For each finding, cite the file and line, explain the issue, give a severity (high/medium/low), and suggest a fix. Your report should be a numbered list, or say 'No issues found' if the code is clean. In both cases, append a short 'What I checked' section: the files you read, the callers you traced, and the commands or tests you ran.
+   You are a senior engineer reviewing a code diff. The diff is at /tmp/pi-review-diff-$REVIEW_ID.md. Read it, then review it focusing ONLY on bugs, logic errors, security issues, missed edge cases, and opportunities to simplify/DRY the code. You have full access to the repository in the current working directory: read related files, trace callers, and run git commands as needed to understand the change in context. Do NOT modify repository files. Do NOT spawn subagents or start another review: use only your own model. Do NOT comment on style, naming, or minor preferences. For each finding, cite the file and line, explain the issue, give a severity (high/medium/low), and suggest a fix. Your report should be a numbered list, or say 'No issues found' if the code is clean. In both cases, append a short 'What I checked' section: the files you read, the callers you traced, and the commands or tests you ran.
 
    IMPORTANT — how to deliver your report: do NOT just print it to the screen. When your review is complete, WRITE the full report to the file /tmp/pi-review-output-$REVIEW_ID.md using your file-writing tool. Then, as your VERY LAST action, create an empty signal file by running: touch /tmp/pi-review-done-$REVIEW_ID. Only create the done-file after the report file has been fully written.
    EOF
@@ -199,7 +207,8 @@ launching** (step 1b) rather than trusting this table.
    # Pass the prompt as a POSITIONAL message, not via -p/--print: -p is the
    # alias for --print (non-interactive, process-and-exit). A positional
    # message launches the full interactive TUI seeded with that first message.
-   exec pi --model "$MODEL" "$(cat /tmp/pi-review-prompt-$ID.txt)"
+   # --exclude-tools removes the Advisor: the reviewer uses only $MODEL.
+   exec pi --model "$MODEL" --exclude-tools ask_advisor,record_advisor_outcome "$(cat /tmp/pi-review-prompt-$ID.txt)"
    EOF
    chmod +x /tmp/pi-review-run-$REVIEW_ID.sh
    rm -f /tmp/pi-review-output-$REVIEW_ID.md /tmp/pi-review-done-$REVIEW_ID
@@ -260,7 +269,7 @@ launching** (step 1b) rather than trusting this table.
      # done-file as usual.
      # This run is synchronous: when it returns, the review is done. Skip
      # step 5b.
-     pi --model '<REVIEWER_MODEL>' -p "$(cat /tmp/pi-review-prompt-$REVIEW_ID.txt)"
+     pi --model '<REVIEWER_MODEL>' --exclude-tools ask_advisor,record_advisor_outcome -p "$(cat /tmp/pi-review-prompt-$REVIEW_ID.txt)"
    fi
    ```
    The pane shows the live pi interface and stays open afterward.
@@ -326,6 +335,9 @@ launching** (step 1b) rather than trusting this table.
 - The default reviewer model is `openrouter/anthropic/claude-opus-5.5` (the
   `opus` alias), used for deep code analysis. Override it per-invocation with
   `--model`.
+- The reviewer never uses the Advisor, even when it is enabled globally in
+  `~/.pi/agent/advisor.json`. Both launch paths (pane runner and `-p`
+  fallback) pass `--exclude-tools ask_advisor,record_advisor_outcome`.
 - Model IDs in the alias table go stale as models ship and retire. Step 1b
   verifies the resolved ID with `pi auth check` before launching, because a bad
   ID otherwise fails silently inside the herdr/tmux pane and the agent just blocks on

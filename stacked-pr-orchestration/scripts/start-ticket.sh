@@ -4,6 +4,8 @@
 # implementer in it with the ticket as its first message. The branch name
 # comes from the "Suggested branch:" line of $STACK_WORK/<TICKET>.md.
 # Send later rounds (review feedback, CI failures) with prompt.sh.
+# The implementer gets the Advisor from the global pi-advisor config. Do not
+# exclude the Advisor tools here. preflight.sh checks the config.
 source "$(dirname "$0")/common.sh"
 set -uo pipefail
 TICKET="$1"; BASE="$2"; EXTRA="${3:-}"

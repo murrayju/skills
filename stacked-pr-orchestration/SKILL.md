@@ -1,6 +1,6 @@
 ---
 name: stacked-pr-orchestration
-description: Orchestrate a series of tickets (for example the sub-issues of a Linear epic) as a stack of green PRs. You stay the orchestrator; each ticket is implemented by a fresh pi subagent in a herdr pane (Opus via concentrate), reviewed by a second model (gpt-6.1-sol), then pushed as a stacked PR, taken through the automated Claude review and CI until green, before the next ticket starts. Use when the user asks to work through many tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
+description: Orchestrate a series of tickets (for example the sub-issues of a Linear epic) as a stack of green PRs. You stay the orchestrator; each ticket is implemented by a fresh pi subagent in a herdr pane (DeepSeek via concentrate, with an Opus Advisor), reviewed by a second model (gpt-6.1-sol, no Advisor), then pushed as a stacked PR, taken through the automated Claude review and CI until green, before the next ticket starts. Use when the user asks to work through many tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
 ---
 
 # Stacked green PRs with herdr + pi subagents
@@ -22,12 +22,21 @@ config-driven (`$STACK_WORK/config.env`), so they work for any repository.
 | role | how | model (default) |
 | -- | -- | -- |
 | orchestrator | you, in the herdr pane the user talks to | (current) |
-| implementer | `pi` in a new herdr pane, one per ticket, clean context | `concentrate/claude-opus-5-5`, thinking high |
-| second-opinion reviewer | `pi` in a pane below the implementer, read-only | `openai-codex/gpt-6.1-sol`, thinking high |
+| implementer | `pi` in a new herdr pane, one per ticket, clean context | `concentrate/deepseek-v4-1-flash-1017`, thinking high |
+| Advisor of the implementer | pi-advisor extension (`ask_advisor` tool and gates), global config | `concentrate/claude-opus-5-5`, effort from `advisor.json` |
+| second-opinion reviewer | `pi` in a pane below the implementer, read-only, NO Advisor | `openai-codex/gpt-6.1-sol`, thinking high |
 | automated PR review | GitHub Action (`claude-review` check), runs when the PR opens | (repo config) |
 
-Fallback if concentrate is down: `openrouter/anthropic/claude-opus-5.5`. Tell the user when you switch
+Fallback if concentrate is down: `openrouter/deepseek/deepseek-v4.1-flash-1017`. Tell the user when you switch
 models. Change `IMPLEMENTER_MODEL` in `config.env`.
+
+**Advisor rules.** The implementer gets the Advisor from the global pi-advisor config
+(`~/.pi/agent/advisor.json`: `advisorToolsEnabled` true, `advisor` = `ADVISOR_MODEL`). `preflight.sh` checks
+this and fails if it is off, if the model differs, or if it equals the implementer model (pi-advisor then
+skips every call). Do not change `advisor.json` yourself: it is the user's global setting. Ask the user to run
+`/advisor` or `/advisor-models`. If concentrate is down, the Advisor is down too; tell the user. The reviewer
+must use only `REVIEWER_MODEL`: `start-review.sh` passes `--exclude-tools ask_advisor,record_advisor_outcome`,
+which removes the tool, the prompt rules and the automatic gates. Keep that flag.
 
 The second-opinion review is worth it: on earlier runs it found real regressions on most PRs that the
 automated review missed (lost images, skipped saves, unbounded caches, wrong focus handling).
@@ -155,6 +164,9 @@ Check the commit statuses of recent `main` commits to see if a check is already 
   <p> --model <m>` (it only checks the provider) and `pi --list-models <m>` (it checks the model);
   `preflight.sh` does both.
 - Only close the panes you made. The user can have panes of their own in the same workspace.
+- To confirm the Advisor setup in a pane, look for an `ask_advisor` tool declaration in its pi session JSONL
+  (`herdr pane get <pane> | jq -r .result.pane.agent_session.value`). The implementer must have it, the
+  reviewer must not.
 
 ## Pitfalls (each one cost time before)
 

@@ -15,8 +15,13 @@ if [ ! -f "$WORK/config.env" ]; then
 REPO="$REPO_PATH"
 GH_REPO="$GH_REPO"
 # pi model ids. Check them with: pi --list-models <pattern>
-IMPLEMENTER_MODEL="concentrate/claude-opus-5-5"
-IMPLEMENTER_FALLBACK_MODEL="openrouter/anthropic/claude-opus-5.5"
+# The implementer runs with the pi-advisor extension. The reviewer runs
+# without it (start-review.sh excludes the Advisor tools).
+IMPLEMENTER_MODEL="concentrate/deepseek-v4-1-flash-1017"
+IMPLEMENTER_FALLBACK_MODEL="openrouter/deepseek/deepseek-v4.1-flash-1017"
+# The Advisor model is global ("advisor" in ~/.pi/agent/advisor.json).
+# preflight.sh checks that it equals this value. It does not change it.
+ADVISOR_MODEL="concentrate/claude-opus-5-5"
 REVIEWER_MODEL="openai-codex/gpt-6.1-sol"
 THINKING="high"
 # The GitHub check of the automated Claude review, and the bot login.
