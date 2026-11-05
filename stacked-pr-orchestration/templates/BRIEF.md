@@ -20,6 +20,8 @@ Do NOT push, do NOT create PRs, do NOT switch branches. The correct branch is al
   "run yarn dedupe and keep dedupe --check clean"; "do not change unrelated lockfile entries".>
 - If the ticket is ambiguous or needs a product or infra decision, choose the safest reasonable option, implement
   it, and flag it in the PR description under "Open questions / decisions".
+- Do not act outside the repository: no publishing, release tags, deploys or infra changes. Prepare the change,
+  and list the step with exact commands under "Manual checks still needed" or "Open questions / decisions".
 - If part of the ticket is impossible now (blocked upstream, needs infra), do what you can, document the rest, and
   explain it in the report. Do not silently skip "Done when" items.
 - Do not spawn subagents unless the work is very large and obviously parallel. If you do, start them with your
@@ -39,6 +41,11 @@ Do NOT push, do NOT create PRs, do NOT switch branches. The correct branch is al
 CI runs: <list the CI commands>. Also build the affected apps: <list>. Run what is relevant; for broad changes
 run all.
 
+- If you remove or replace a dependency, build EVERY app bundle. Its transitive packages disappear too, and code
+  that imported one of them without declaring it breaks only at bundle time (undeclared-dependency checks can
+  miss Node builtin names such as `url` or `events`).
+- Report only what you ran. If you could not run a check, say so and say why.
+
 ## Test coverage (required)
 
 Add automated tests around every feature that the change touches, to show that behavior is not made worse.
@@ -50,6 +57,12 @@ Add automated tests around every feature that the change touches, to show that b
   see the tests fail, then restore it. Report the result.
 - For build-tooling changes, the "tests" can be output checks: compare the build output before and after, and
   explain each difference. Add a cheap automated guard where possible.
+- Assert the effective result (the computed style, the declaration that wins, the value a user sees), not only
+  that a string is present in the output.
+- Screenshot diffs cover static states only. For CSS or UI framework changes, also check interaction states
+  (hover, focus, open menus) in a real browser.
+- Before you write a verifier, look for the tool's own check (for example `prettier --debug-check`). A
+  hand-written checker is code that must be correct and maintained.
 - List the new tests and what each one protects in the PR description. List the visual or manual QA that you could
   not automate under "Manual checks still needed".
 

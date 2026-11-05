@@ -9,7 +9,12 @@ if [ "$(git config --get commit.gpgsign)" = true ]; then
   echo test | gpg --clearsign >/dev/null 2>&1 && echo "gpg: ok" || { echo "gpg: SIGNING FAILS (ask the user to unlock gpg)"; ok=0; }
 fi
 [ -n "${ADVISOR_MODEL:-}" ] || { echo "advisor: ADVISOR_MODEL is not set in $STACK_WORK/config.env"; ok=0; }
-for m in "$IMPLEMENTER_MODEL" "$REVIEWER_MODEL" ${ADVISOR_MODEL:+"$ADVISOR_MODEL"}; do
+for v in IMPLEMENTER_MODEL REVIEWER_MODEL_1 REVIEWER_MODEL_2; do
+  [ -n "${!v:-}" ] || { echo "config: $v is not set in $STACK_WORK/config.env"; ok=0; }
+done
+[ "${REVIEWER_MODEL_1:-}" != "${IMPLEMENTER_MODEL:-}" ] || { echo "config: reviewer 1 is the implementer model"; ok=0; }
+for m in "$IMPLEMENTER_MODEL" "${REVIEWER_MODEL_1:-}" "${REVIEWER_MODEL_2:-}" ${ADVISOR_MODEL:+"$ADVISOR_MODEL"}; do
+  [ -n "$m" ] || continue
   r=$(pi auth check --provider "${m%%/*}" --model "${m#*/}" 2>&1 | tail -1)
   listed=$(pi --list-models "${m#*/}" 2>/dev/null | awk -v p="${m%%/*}" -v id="${m#*/}" '$1==p && $2==id' | wc -l)
   if [ "$r" = ready ] && [ "$listed" -ge 1 ]; then echo "model $m: ok"; else echo "model $m: NOT READY ($r, listed=$listed)"; ok=0; fi
