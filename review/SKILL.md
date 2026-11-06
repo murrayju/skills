@@ -45,46 +45,62 @@ only needs the commands in step 5.
 
 Arguments (any order, all optional):
 
-- **`--model <name>` / `-m <name>`** — the reviewer model. Accepts a short
-  alias or a full `provider/model` ID. Defaults to
-  `openrouter/anthropic/claude-opus-5.5` (the `opus` alias).
-- **Any other argument** — a git revision range. If omitted, defaults to the
+- **`--model <name>` / `-m <name>`**: the reviewer model, named any way the
+  user likes: `opus`, `gpt 6.1 sol`, `gemini flash`, or a full
+  `provider/model` ID. Defaults to `opus`, which is the newest Claude Opus on
+  the preferred provider (today `concentrate/claude-opus-5-5`).
+- **Any other argument**: a git revision range. If omitted, defaults to the
   current branch (see below).
 
-### Model aliases
+### Choosing the reviewer model
 
-Map common short names to full IDs; pass anything containing a `/` through
-unchanged:
+Keep no list of model IDs here: they drift as models ship and retire. Resolve
+the name against the live catalog instead, with the resolver script this skill
+links from the shared `scripts/` folder:
 
-| Alias                           | Full ID                                 |
-| ------------------------------- | --------------------------------------- |
-| `fable`, `fable-5`              | `openrouter/anthropic/claude-fable-5.1` |
-| `opus`, `opus-5`                | `openrouter/anthropic/claude-opus-5.5`  |
-| `gpt`, `sol`                    | `openrouter/openai/gpt-6-sol`           |
-| `astra`                         | `openrouter/openai/gpt-6-astra`         |
-| `gemini`                        | `openrouter/google/gemini-3.8-flash`    |
-| `glm`                           | `openrouter/z-ai/glm-5.3`               |
-| `kimi`                          | `openrouter/moonshotai/kimi-k3`         |
-| `deepseek`                      | `openrouter/deepseek/deepseek-v4-pro`   |
-| `minimax`                       | `openrouter/minimax/minimax-m3`         |
-| `grok`                          | `openrouter/x-ai/grok-4.7`              |
+```bash
+~/.agents/skills/review/scripts/resolve-model.sh "<what the user typed>"   # best 3, best first
+```
 
-Prefer to use the openrouter provider, when available there.
+It prints full `provider/model` IDs, best first, using the ranks below. Take
+the first line. No output with exit 0 means that no model matches; a non-zero
+exit means that the catalog could not be read, which you report to the user
+instead of guessing.
 
-Note the vendor prefix within an openrouter ID is the **model vendor**, not a
-pi provider name: OpenAI models are `openrouter/openai/...`. There is a
-separate `openai-codex` pi provider whose models are bare IDs (`gpt-5.6-sol`,
-no vendor prefix) — `openrouter/openai-codex/...` is never valid.
+1. **An exact ID wins.** If the user typed a full ID that exists, the script
+   returns it unchanged. In an openrouter ID the part after the provider is
+   the model **vendor**, not a pi provider: OpenAI models are
+   `openrouter/openai/...`, and `openrouter/openai-codex/...` never exists.
+2. **Then the provider.** `concentrate` first, `openrouter` second, and every
+   other provider last.
+3. **Then the generation.** The first run of numbers in the name is the
+   version (`gpt-6.1-sol` is 6.1, `claude-opus-5-5` is 5.5), and the highest
+   version wins, so `opus` gives the newest Claude Opus. A date suffix counts
+   as part of the version, so of two snapshots of one model the newer date
+   wins: `deepseek-v4-flash-0731` beats `deepseek-v4-flash-0423`.
+4. **Then the shortest name**, which is the base model and not a `-pro`
+   variant or a `-highspeed` clone.
 
-These IDs drift as models are released and retired, so **always verify before
-launching** (step 1b) rather than trusting this table.
+Matching ignores case, treats `.` and `-` as the same character, and needs
+only part of the name, so `claude-opus-5.5`, `gemini flash` and `kimi k3` all
+match. It skips `:batch`, `:free` and `~latest` IDs.
+
+Do not let `pi` resolve the name at launch. It does resolve a short name, but
+it takes the first catalog match, which today is a Bedrock ID
+(`us.openai.gpt-6.1-sol`), so the provider preference is lost.
+
+If the script prints nothing, nothing matches: show the user
+`pi --list-models` and ask which model they meant. If the first line is the
+wrong variant of what the user named (they said `gemini` and got
+`gemini-4-argon`), use a more specific name or take another printed line. Tell
+the user which ID you picked.
 
 ## Instructions
 
 1. **Parse the arguments.**
-   - Extract the reviewer model from `--model`/`-m` if present, resolving
-     aliases via the table above. Otherwise use
-     `openrouter/anthropic/claude-opus-5.5` (the `opus` alias).
+   - Extract the reviewer model from `--model`/`-m` if present and resolve it
+     with `~/.agents/skills/review/scripts/resolve-model.sh` (see "Choosing the
+     reviewer model"). Otherwise resolve `opus`.
    - Treat any remaining non-flag argument as the git revision `RANGE`.
    - **Generate a unique run ID** so parallel reviews never clash on shared
      `/tmp` paths. Use it as `REVIEW_ID` in every temp filename below:
@@ -95,43 +111,27 @@ launching** (step 1b) rather than trusting this table.
      `/tmp/pi-review-<purpose>-$REVIEW_ID.*` — substitute the actual generated
      ID when you run the commands.
 
-1b. **Verify the model resolves before launching.** A bad model ID fails inside
-   the herdr/tmux pane, where the error is invisible to the agent. The agent
-   just blocks on the done-file until it times out. Always check first.
+1b. **Verify the model exists and the provider is ready.** A bad model ID
+   fails inside the herdr/tmux pane, where the error is invisible to the agent.
+   The agent just blocks on the done-file until it times out. Check first.
 
-   Split the resolved ID on its *first* `/` into pi provider + model, then
-   confirm **both** that the provider is authenticated and that the model
-   actually exists in that provider's catalog:
+   Confirm that the ID is in the live catalog, spelled exactly. An exact ID
+   ranks first, so the resolver returns it unchanged when it exists:
    ```bash
-   # 1. provider auth (note: this validates ONLY the provider, never the model)
+   [ "$(~/.agents/skills/review/scripts/resolve-model.sh '<MODEL>' 1)" = '<MODEL>' ] \
+     || { echo "MODEL NOT FOUND: <MODEL>"; exit 1; }
+   ```
+   Then confirm that the provider can serve it. Split the resolved ID on its
+   *first* `/` into provider and model; the rest of the ID, slashes included,
+   is the model:
+   ```bash
    pi auth check --provider <PROVIDER> --model <MODEL>   # want: "ready"
-
-   # 2. model exists in that provider's catalog — this is the check that
-   #    actually catches a wrong/stale model ID
-   node -e "
-   const s=require(process.env.HOME+'/.pi/agent/models-store.json');
-   const [,p,...r]=process.argv; const m=r.join('/');
-   const ids=new Set(((s[p]||{}).models||[]).map(x=>x.id||x.name));
-   console.log(ids.has(m) ? 'model OK' : 'MODEL NOT FOUND in '+p);
-   " '<PROVIDER>' '<MODEL>'
    ```
-   `pi auth check` returns `ready` for *any* model string as long as the
-   provider is authenticated — it will happily pass a nonexistent model — so
-   the catalog check is not optional.
+   Note that `pi auth check` answers `ready` for any model string, existing or
+   not, so the exact-ID check above is not optional.
 
-   If either check fails, do not launch. List the real IDs and pick the closest
-   match:
-   ```bash
-   node -e "
-   const s=require(process.env.HOME+'/.pi/agent/models-store.json');
-   for (const [prov, v] of Object.entries(s))
-     for (const m of v.models||[]) console.log(prov+'/'+(m.id||m.name));
-   " | grep -iE '<pattern>'
-   ```
-   Configured providers are the keys of `~/.pi/agent/auth.json`; a provider
-   missing from that file reports `invalid` regardless of model ID. Report the
-   correction to the user rather than silently substituting a different model
-   than they asked for.
+   If either check fails, do not launch. Report it to the user rather than
+   silently substituting a different model than they asked for.
 
 2. **Determine the range** when none was provided (the default — review the
    current branch):
@@ -332,16 +332,17 @@ launching** (step 1b) rather than trusting this table.
 
 ## Notes
 
-- The default reviewer model is `openrouter/anthropic/claude-opus-5.5` (the
-  `opus` alias), used for deep code analysis. Override it per-invocation with
-  `--model`.
+- The default reviewer model is `opus`, which resolves to the newest Claude
+  Opus on the preferred provider (today `concentrate/claude-opus-5-5`), used
+  for deep code analysis. Override it per-invocation with `--model`.
 - The reviewer never uses the Advisor, even when it is enabled globally in
   `~/.pi/agent/advisor.json`. Both launch paths (pane runner and `-p`
   fallback) pass `--exclude-tools ask_advisor,record_advisor_outcome`.
-- Model IDs in the alias table go stale as models ship and retire. Step 1b
-  verifies the resolved ID with `pi auth check` before launching, because a bad
-  ID otherwise fails silently inside the herdr/tmux pane and the agent just blocks on
-  the done-file until it times out.
+- `~/.agents/skills/review/scripts/resolve-model.sh` reads the live catalog
+  from `pi --list-models` on every call, so it never goes stale. Step 1b then
+  checks that the provider is ready with `pi auth check`, because a bad ID
+  otherwise fails silently inside the herdr/tmux pane and the agent just blocks
+  on the done-file until it times out.
 - Inside herdr or tmux, the subagent runs the **full interactive `pi` TUI** (not
   `--print`), so the user sees its live progress (thinking, tool calls, file
   reads) stream in the pane. Outside both it falls back to non-interactive

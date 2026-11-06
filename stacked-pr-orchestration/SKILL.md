@@ -24,11 +24,12 @@ config-driven (`$STACK_WORK/config.env`), so they work for any repository.
 | orchestrator | you, in the herdr pane the user talks to | | (current) |
 | implementer | `pi` in a new herdr pane, one per ticket, clean context | `IMPLEMENTER_MODEL` | `concentrate/deepseek-v4-1-flash-1017` |
 | Advisor of the implementer | pi-advisor extension (`ask_advisor` tool and gates), global config | `ADVISOR_MODEL` | `concentrate/claude-opus-5-5` |
-| reviewer, round 1 | `pi` in a pane below the implementer, read-only, NO Advisor, before the PR opens | `REVIEWER_MODEL_1` | `openai-codex/gpt-6.1-sol` |
+| reviewer, round 1 | `pi` in a pane below the implementer, read-only, NO Advisor, before the PR opens | `REVIEWER_MODEL_1` | `concentrate/gpt-6.1-sol` |
 | reviewer, round 2 | the same, after the round 1 fixes, next to the automated PR review | `REVIEWER_MODEL_2` | `concentrate/claude-opus-5-5` |
 | automated PR review | GitHub Action (`claude-review` check), runs when the PR opens | | (repo config) |
 
-All pi agents run with `THINKING` (default high). Fallback for the implementer if concentrate is down:
+All pi agents run with `THINKING` (default high). Provider preference for every role: `concentrate` first,
+`openrouter` second, every other provider last. Fallback for the implementer if concentrate is down:
 `openrouter/deepseek/deepseek-v4.1-flash-1017`. Tell the user when you switch models (edit `config.env`).
 
 **Two review rounds, two model families.** Each round found real bugs that the other round and the
@@ -42,15 +43,19 @@ Ask these in one message, before `init.sh`, and wait for the answers. Show the d
 
 1. **Models** for the implementer, the Advisor, reviewer 1 and reviewer 2. The defaults suit routine
    dependency and refactor work. For complex or risky work (architecture, security, data migrations, large
-   UI rewrites), offer stronger reviewers, for example `openai-codex/gpt-6-astra` and
-   `concentrate/claude-fable-5-1`. The Advisor model is global (`~/.pi/agent/advisor.json`): if the user
-   wants a different one, they change it with `/advisor-models`, not you.
+   UI rewrites), offer stronger reviewers, for example "GPT Astra" and "Claude Fable 5". Keep the two
+   reviewers in different model families. The Advisor model is global (`~/.pi/agent/advisor.json`): if the
+   user wants a different one, they change it with `/advisor-models`, not you.
 2. **Scope:** the epic or ticket list, and tickets to skip or that need a product or infra decision.
 3. **Authority outside the repo:** publishing packages, release tags, deploys, infra changes. Default: do
    not do them; park the ticket and ask.
 4. **Merge strategy** (squash or rebase) and whether to pause after each PR.
 
-Check each model id with `pi --list-models <id>`, then pass the answers to `init.sh` (below).
+Resolve each answer to a full id with
+`~/.agents/skills/stacked-pr-orchestration/scripts/resolve-model.sh "<the words the user used>"`, and show
+the user the id. The script reads the live catalog from `pi --list-models`, so keep no list of ids yourself:
+they drift. It ranks an exact id first, then the provider (`concentrate`, then `openrouter`, then the
+others), then the newest generation, and it prints the best three. Pass the ids to `init.sh` (below).
 
 **Advisor rules.** The implementer gets the Advisor from the global pi-advisor config
 (`~/.pi/agent/advisor.json`: `advisorToolsEnabled` true, `advisor` = `ADVISOR_MODEL`). `preflight.sh` checks
@@ -211,9 +216,10 @@ Check the commit statuses of recent `main` commits to see if a check is already 
   `pane read` works while pi is busy, but `herdr agent read` with `--lines` fails then). For tool-call
   detail, read its pi session JSONL (`herdr pane get <pane> | jq -r .result.pane.agent_session.value`).
 - **A bad model id does not make pi exit.** pi shows the API error (`model_not_found`) and stays idle.
-  `wait_working` catches it from the screen. Before a run, check models with `pi auth check --provider
-  <p> --model <m>` (it only checks the provider) and `pi --list-models <m>` (it checks the model);
-  `preflight.sh` does both.
+  `wait_working` catches it from the screen. Resolve ids with `resolve-model.sh` (see "Before you
+  start") before a run, and do not let pi pick one from a short name: `pi --model <short name>` takes the
+  first catalog match, which is a Bedrock id, so the provider preference is lost. `preflight.sh` then
+  checks that each configured id is listed and ready.
 - Only close the panes you made. The user can have panes of their own in the same workspace.
 - To confirm the Advisor setup in a pane, look for an `ask_advisor` tool declaration in its pi session JSONL
   (`herdr pane get <pane> | jq -r .result.pane.agent_session.value`). The implementer must have it, the

@@ -22,6 +22,20 @@ loads when the skill is invoked.
   review and CI loop until green. Includes helper scripts and a subagent brief
   template.
 
+## Shared scripts
+
+`scripts/` at the root of this repo holds the scripts that more than one skill
+uses. A skill links to them instead of copying them, for example
+`review/scripts/resolve-model.sh -> ../../scripts/resolve-model.sh`. The links
+are relative, so a clone works anywhere. A skill moved out of this repo on its
+own also needs the shared folder.
+
+`scripts/resolve-model.sh` resolves the name of a model, as a user says it, to
+the full `provider/model` IDs from the live `pi --list-models` catalog. It ranks
+an exact ID first, then the provider (`concentrate`, then `openrouter`, then the
+others), then the newest generation, and it prints the best three. Both the
+`review` and `stacked-pr-orchestration` skills use it.
+
 ## Usage
 
 Clone this repo into your pi skills directory:

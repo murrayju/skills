@@ -17,7 +17,8 @@ if [ ! -f "$WORK/config.env" ]; then
 # Config of the stacked PR run $RUN_ID.
 REPO="$REPO_PATH"
 GH_REPO="$GH_REPO"
-# pi model ids, chosen by the user. Check them with: pi --list-models <pattern>
+# pi model ids, chosen by the user and resolved with resolve-model.sh (concentrate
+# first, openrouter second, other providers last).
 # The implementer runs with the pi-advisor extension. The reviewers run
 # without it (start-review.sh excludes the Advisor tools).
 IMPLEMENTER_MODEL="${IMPLEMENTER_MODEL:-concentrate/deepseek-v4-1-flash-1017}"
@@ -27,7 +28,7 @@ IMPLEMENTER_FALLBACK_MODEL="${IMPLEMENTER_FALLBACK_MODEL:-openrouter/deepseek/de
 ADVISOR_MODEL="${ADVISOR_MODEL:-concentrate/claude-opus-5-5}"
 # Review round 1 runs before the PR opens. Round 2 runs after the round 1
 # fixes, next to the automated PR review. Use two different model families.
-REVIEWER_MODEL_1="${REVIEWER_MODEL_1:-openai-codex/gpt-6.1-sol}"
+REVIEWER_MODEL_1="${REVIEWER_MODEL_1:-concentrate/gpt-6.1-sol}"
 REVIEWER_MODEL_2="${REVIEWER_MODEL_2:-concentrate/claude-opus-5-5}"
 THINKING="high"
 # The GitHub check of the automated Claude review, and the bot login.
