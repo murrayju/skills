@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # Usage: post-replies.py <TICKET> [PR] [REPLIES_FILE]
-# Read REPLIES_FILE (default $STACK_WORK/<TICKET>-replies.md; for a later round
-# give for example $STACK_WORK/<TICKET>-replies2.md). Post "## top-level" as a PR comment,
+# Read REPLIES_FILE (default $PR_WORK/<TICKET>-replies.md; for a later round
+# give for example $PR_WORK/<TICKET>-replies2.md). Post "## top-level" as a PR comment,
 # and each "## inline <id>" as a reply to that review comment. Do not post
 # other sections (for example "## follow-ups": put those in the tracker).
 import os, re, subprocess, sys, tempfile
 
-work = os.environ['STACK_WORK']
+work = os.environ['PR_WORK']
 cfg = dict(re.findall(r'^(\w+)="?([^"\n]*)"?$', open(f'{work}/config.env').read(), re.M))
 ticket = sys.argv[1]
 pr = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else open(f'{work}/{ticket}-pr-number').read().strip()

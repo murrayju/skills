@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Usage: wait-pr.sh <PR> [MAX_MINUTES] [--review]
 # Wait until no check is pending. Print the checks.
-# With --review, also wait for the automated Claude review check. That review
+# With --review, also wait for the automated PR review check. That review
 # runs only when the PR opens (or on a review request), not after a push, so
 # use --review only for the first wait.
 source "$(dirname "$0")/common.sh"
 PR="$1"; MAX="${2:-90}"; NEED_REVIEW=0
-[ "${3:-}" = "--review" ] && NEED_REVIEW=1
+# With no automated review in the repository (CLAUDE_REVIEW_CHECK=""),
+# --review does nothing.
+[ "${3:-}" = "--review" ] && [ -n "${CLAUDE_REVIEW_CHECK:-}" ] && NEED_REVIEW=1
 sleep 45
 OUT=""
 for _ in $(seq 1 $(( MAX * 2 ))); do

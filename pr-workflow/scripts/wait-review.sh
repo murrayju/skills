@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Usage: wait-review.sh <TICKET> [MAX_MINUTES]
-# Wait for the reviewer report of the ticket, then print it. Stop if the
-# reviewer pane closes before the report (pi exited). Run it again if it stops
-# at MAX_MINUTES.
+# Wait for the report of the latest review round of the ticket, then print
+# it. Stop if the reviewer pane closes before the report (pi exited). Run it
+# again if it stops at MAX_MINUTES.
 source "$(dirname "$0")/common.sh"
-ID=$(read_file "$STACK_WORK/$1-review-id") || exit 1
-PANE=$(read_file "$STACK_WORK/$1-review-pane") || exit 1
-R="$STACK_WORK/review"; MAX="${2:-55}"; misses=0
+LAST=$(tail -1 "$PR_WORK/$1-reviews.tsv" 2>/dev/null)
+[ -n "$LAST" ] || { echo "no review round in $PR_WORK/$1-reviews.tsv"; exit 1; }
+ID=$(echo "$LAST" | cut -f3); PANE=$(echo "$LAST" | cut -f4)
+R="$PR_WORK/review"; MAX="${2:-55}"; misses=0
 for _ in $(seq 1 $(( MAX * 12 ))); do
   [ -f "$R/$ID-done" ] && break
   # A closed pane counts only after 3 checks in a row.

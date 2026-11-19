@@ -15,11 +15,12 @@ loads when the skill is invoked.
   Invoke via `/skill:review`, `/skill:review main..HEAD`, or
   `/skill:review --model gpt-5.5`.
 
-- **stacked-pr-orchestration**: Work through a series of tickets (for example
-  the sub-issues of a Linear epic) as a stack of green PRs. The agent stays the
-  orchestrator: each ticket gets a fresh pi subagent in a herdr pane, a
-  second-opinion review by another model, a stacked PR, and the automated
-  review and CI loop until green. Includes helper scripts and a subagent brief
+- **pr-workflow**: Take a task or ticket to a green PR. The agent stays the
+  orchestrator: a fresh pi subagent in a herdr pane implements the work, a
+  sequence of reviewer models reviews it before the PR opens, then CI goes
+  green, the PR feedback is addressed, and the reviewers run again until no
+  high or medium findings remain. A list of tickets (for example a Linear epic)
+  repeats the loop as stacked PRs. Includes helper scripts and a subagent brief
   template.
 
 ## Shared scripts
@@ -34,7 +35,7 @@ own also needs the shared folder.
 the full `provider/model` IDs from the live `pi --list-models` catalog. It ranks
 an exact ID first, then the provider (`concentrate`, then `openrouter`, then the
 others), then the newest generation, and it prints the best three. Both the
-`review` and `stacked-pr-orchestration` skills use it.
+`review` and `pr-workflow` skills use it.
 
 ## Usage
 

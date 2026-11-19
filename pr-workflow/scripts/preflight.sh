@@ -2,34 +2,33 @@
 # Usage: preflight.sh
 # Check the things that stopped earlier runs: herdr, commit signing, model
 # auth, gh auth and a clean tree. Run it before each ticket.
+# A "WARN" line does not stop the run. Tell the user about it in the summary.
 source "$(dirname "$0")/common.sh"
 ok=1
 [ "${HERDR_ENV:-}" = 1 ] && echo "herdr: ok ($HERDR_PANE_ID)" || { echo "herdr: NOT in a herdr pane"; ok=0; }
 if [ "$(git config --get commit.gpgsign)" = true ]; then
   echo test | gpg --clearsign >/dev/null 2>&1 && echo "gpg: ok" || { echo "gpg: SIGNING FAILS (ask the user to unlock gpg)"; ok=0; }
 fi
-[ -n "${ADVISOR_MODEL:-}" ] || { echo "advisor: ADVISOR_MODEL is not set in $STACK_WORK/config.env"; ok=0; }
-for v in IMPLEMENTER_MODEL REVIEWER_MODEL_1 REVIEWER_MODEL_2; do
-  [ -n "${!v:-}" ] || { echo "config: $v is not set in $STACK_WORK/config.env"; ok=0; }
-done
-[ "${REVIEWER_MODEL_1:-}" != "${IMPLEMENTER_MODEL:-}" ] || { echo "config: reviewer 1 is the implementer model"; ok=0; }
-for m in "$IMPLEMENTER_MODEL" "${REVIEWER_MODEL_1:-}" "${REVIEWER_MODEL_2:-}" ${ADVISOR_MODEL:+"$ADVISOR_MODEL"}; do
-  [ -n "$m" ] || continue
+[ -n "${IMPLEMENTER_MODEL:-}" ] || { echo "config: IMPLEMENTER_MODEL is not set in $PR_WORK/config.env"; ok=0; }
+[ -n "${REVIEWER_MODELS:-}" ] || { echo "config: REVIEWER_MODELS is not set in $PR_WORK/config.env"; ok=0; }
+for m in ${IMPLEMENTER_MODEL:-} ${REVIEWER_MODELS:-}; do
   r=$(pi auth check --provider "${m%%/*}" --model "${m#*/}" 2>&1 | tail -1)
   listed=$(pi --list-models "${m#*/}" 2>/dev/null | awk -v p="${m%%/*}" -v id="${m#*/}" '$1==p && $2==id' | wc -l)
   if [ "$r" = ready ] && [ "$listed" -ge 1 ]; then echo "model $m: ok"; else echo "model $m: NOT READY ($r, listed=$listed)"; ok=0; fi
 done
-# The implementer needs the Advisor. Its config is global, so only check it.
-# Do not use ".advisorToolsEnabled // true": jq treats false as missing there.
+for m in ${REVIEWER_MODELS:-}; do
+  [ "$m" != "${IMPLEMENTER_MODEL:-}" ] || echo "WARN: reviewer $m is also the implementer model"
+done
+# The implementer uses the global Advisor config. Only check it: it is the
+# user's setting. Do not use ".x // true": jq treats false as missing there.
 A="$HOME/.pi/agent/advisor.json"
 adv_tools=$(jq -r 'if has("advisorToolsEnabled") then .advisorToolsEnabled else true end' "$A" 2>/dev/null)
+adv_same_off=$(jq -r 'if has("advisorDisableSameModel") then .advisorDisableSameModel else true end' "$A" 2>/dev/null)
 adv_model=$(jq -r '.advisor // empty' "$A" 2>/dev/null)
-if [ "$adv_tools" != true ]; then
-  echo "advisor: tools are disabled in $A (ask the user to run /advisor)"; ok=0
-elif [ "$adv_model" != "${ADVISOR_MODEL:-}" ]; then
-  echo "advisor: $A has '$adv_model', the config wants '${ADVISOR_MODEL:-}'"; ok=0
-elif [ "$adv_model" = "$IMPLEMENTER_MODEL" ]; then
-  echo "advisor: same model as the implementer, so pi-advisor skips every call"; ok=0
+if [ "$adv_tools" != true ] || [ -z "$adv_model" ]; then
+  echo "WARN: advisor: not enabled in $A, so the implementer has no Advisor"
+elif [ "$adv_model" = "${IMPLEMENTER_MODEL:-}" ] && [ "$adv_same_off" = true ]; then
+  echo "WARN: advisor: $adv_model is the implementer model, so pi-advisor skips every call"
 else
   echo "advisor: ok ($adv_model)"
 fi

@@ -1,11 +1,11 @@
-# Shared setup for the stacked-pr-orchestration scripts. Source this file.
-# It loads the config of the current run from $STACK_WORK/config.env.
-if [ -z "${STACK_WORK:-}" ]; then
-  echo "STACK_WORK is not set. Run init.sh, then export STACK_WORK." >&2
+# Shared setup for the pr-workflow scripts. Source this file.
+# It loads the config of the current run from $PR_WORK/config.env.
+if [ -z "${PR_WORK:-}" ]; then
+  echo "PR_WORK is not set. Run init.sh, then export PR_WORK." >&2
   exit 2
 fi
 # shellcheck disable=SC1091
-source "$STACK_WORK/config.env"
+source "$PR_WORK/config.env"
 SKILL_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The tools of the pi-advisor extension. Give "--exclude-tools $ADVISOR_TOOLS"
 # to pi to run it without the Advisor. All Advisor paths need ask_advisor.
