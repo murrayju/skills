@@ -3,7 +3,7 @@
 #          init.sh <RUN_ID> <REPO_PATH> [GH_REPO]
 # Make the work directory of a run and its config. Print the export line.
 # Do not ask the user for the models. The defaults: the implementer uses the
-# model of the current pi session, and the reviewers are the newest carbon,
+# model of the current pi session, and the reviewers are the newest neon,
 # astra and fable models. Give other values only if the user named them.
 # The Advisor of the implementer is the global pi-advisor config. This script
 # does not set it.
@@ -21,7 +21,7 @@ if [ ! -f "$WORK/config.env" ]; then
     IMPLEMENTER_MODEL="$PI_PROVIDER/$PI_MODEL"
   fi
   if [ -z "${REVIEWER_MODELS:-}" ]; then
-    for name in carbon astra fable; do
+    for name in neon astra fable; do
       id=$("$SKILL_DIR/scripts/resolve-model.sh" "$name" 1 2>/dev/null)
       [ -n "$id" ] || { echo "no model matches '$name'" >&2; exit 1; }
       REVIEWER_MODELS="${REVIEWER_MODELS:+$REVIEWER_MODELS }$id"

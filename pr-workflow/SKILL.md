@@ -1,6 +1,6 @@
 ---
 name: pr-workflow
-description: Take work from a task or ticket to a green PR. You stay the orchestrator; a fresh pi subagent in a herdr pane (the current model, with the configured Advisor) implements it, a sequence of reviewer models (default carbon, astra, fable; no Advisor) reviews it before the PR opens, then CI goes green, the PR feedback is addressed, and the reviewers run again until no high or medium findings remain. Works for a single PR; a list of tickets (for example the sub-issues of a Linear epic) repeats the loop as stacked PRs. Do not ask the user about the workflow. Use when the user asks to implement a ticket or task as a PR, to work through tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
+description: Take work from a task or ticket to a green PR. You stay the orchestrator; a fresh pi subagent in a herdr pane (the current model, with the configured Advisor) implements it, a sequence of reviewer models (default neon, astra, fable; no Advisor) reviews it before the PR opens, then CI goes green, the PR feedback is addressed, and the reviewers run again until no high or medium findings remain. Works for a single PR; a list of tickets (for example the sub-issues of a Linear epic) repeats the loop as stacked PRs. Do not ask the user about the workflow. Use when the user asks to implement a ticket or task as a PR, to work through tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
 ---
 
 # PR workflow with herdr + pi subagents
@@ -31,7 +31,7 @@ Do not ask questions about the workflow. Use these defaults, and change one only
 | -- | -- |
 | implementer | the model of the current pi session (`$PI_PROVIDER/$PI_MODEL`), in a new herdr pane, one per ticket |
 | Advisor of the implementer | the global pi-advisor config (`~/.pi/agent/advisor.json`), as the user set it |
-| reviewers, in order | the newest `carbon`, `astra` and `fable` models (`init.sh` resolves the names) |
+| reviewers, in order | the newest `neon`, `astra` and `fable` models (`init.sh` resolves the names) |
 | automated PR review | the repository's own (for example the `claude-review` GitHub check) |
 | scope | what the prompt names: one task, one ticket, a list, or the open sub-issues of an epic |
 | base branch | the default branch for the first PR; the previous PR's branch for each later item of a list |
