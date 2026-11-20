@@ -1,6 +1,6 @@
 ---
 name: pr-workflow
-description: Take work from a task or ticket to a green PR. You stay the orchestrator; a fresh pi subagent in a herdr pane (the current model, with the configured Advisor) implements it, a sequence of reviewer models (default neon, astra, fable; no Advisor) reviews it before the PR opens, then CI goes green, the PR feedback is addressed, and the reviewers run again until no high or medium findings remain. Works for a single PR; a list of tickets (for example the sub-issues of a Linear epic) repeats the loop as stacked PRs. Do not ask the user about the workflow. Use when the user asks to implement a ticket or task as a PR, to work through tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
+description: Take work from a task or ticket to a green PR. You stay the orchestrator; a fresh pi subagent in a named Herdr tab via herdr_subagent (the current model, with the configured Advisor) implements it, a sequence of reviewer models (default neon, astra, fable; no Advisor) reviews it before the PR opens, then CI goes green, the PR feedback is addressed, and the reviewers run again until no high or medium findings remain. Falls back to manual Herdr split panes when herdr_subagent is not installed. Works for a single PR; a list of tickets (for example the sub-issues of a Linear epic) repeats the loop as stacked PRs. Do not ask the user about the workflow. Use when the user asks to implement a ticket or task as a PR, to work through tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
 ---
 
 # PR workflow with herdr + pi subagents
@@ -29,7 +29,7 @@ Do not ask questions about the workflow. Use these defaults, and change one only
 
 | item | default |
 | -- | -- |
-| implementer | the model of the current pi session (`$PI_PROVIDER/$PI_MODEL`), in a new herdr pane, one per ticket |
+| implementer | the model of the current pi session (`$PI_PROVIDER/$PI_MODEL`), in a named Herdr tab via `herdr_subagent`, one per ticket |
 | Advisor of the implementer | the global pi-advisor config (`~/.pi/agent/advisor.json`), as the user set it |
 | reviewers, in order | the newest `neon`, `astra` and `fable` models (`init.sh` resolves the names) |
 | automated PR review | the repository's own (for example the `claude-review` GitHub check) |
@@ -45,7 +45,8 @@ If the user names other models, resolve each name with
 `~/.agents/skills/pr-workflow/scripts/resolve-model.sh "<the words the user used>"` and pass the full ids to
 `init.sh`. The script reads the live catalog from `pi --list-models`, so keep no list of ids yourself: they
 drift. It ranks an exact id first, then the provider (`concentrate`, then `openrouter`, then the others), then
-the newest generation. Do not let pi pick a model from a short name (see "herdr + pi").
+the newest generation. Always pass full `provider/model` IDs: `herdr_subagent` requires an exact ID, and in
+fallback mode `pi` resolves short names to the first catalog match.
 
 If the items of a list are not related, or the user asks for it, base each PR on the default branch instead of
 stacking it.
@@ -58,33 +59,42 @@ chose in the summary.
 
 | role | how | config key |
 | -- | -- | -- |
-| orchestrator | you, in the herdr pane the user talks to | |
-| implementer | `pi` in a new herdr pane, one per ticket, clean context | `IMPLEMENTER_MODEL` |
+| orchestrator | you, in the Herdr tab/pane the user talks to | |
+| implementer | `pi` in a named Herdr tab (`herdr_subagent`), one per ticket, clean context | `IMPLEMENTER_MODEL` |
 | Advisor of the implementer | pi-advisor extension (`ask_advisor` tool and gates), global config | (none) |
-| reviewers | `pi` in a pane below the implementer, read-only, NO Advisor, one round at a time | `REVIEWER_MODELS` |
+| reviewers | `pi` in a named Herdr tab (`herdr_subagent`, `advisor: false`), read-only, one round at a time | `REVIEWER_MODELS` |
 | automated PR review | GitHub Action, runs when the PR opens | `CLAUDE_REVIEW_CHECK` |
 
-All pi agents run with `THINKING` (default high).
+Prefer the `herdr_subagent` tool (from `murrayju/pi-herdr-subagents`) whenever it is available: it launches
+workers in named background Herdr tabs, tracks usage and cost in the footer, and reports completion directly
+without signal files. When `herdr_subagent` is not installed, use the fallback scripts described in
+"Fallback: manual panes without `herdr_subagent`".
+
+`herdr_subagent` inherits the orchestrator session's current thinking level, so run the orchestrator at `high`
+thinking (`THINKING` in `config.env` only applies to the fallback scripts).
 
 **Review rounds.** Round N uses the reviewer at position (N-1) modulo the count of `REVIEWER_MODELS`, so one
 **pass** runs every reviewer once, in order. Each round gets all earlier reports and the PR feedback
-(`start-review.sh` passes them), so it checks the fixes and looks for what the others missed. Keep the
+(`start-review.sh --prepare` includes them), so it checks the fixes and looks for what the others missed. Keep the
 reviewers in different model families: on earlier runs each family found real bugs that the others and the
 automated review missed (lost hover states, a rem fallback that beat the px theme, a deploy race, a silently
 skipped CI test, lost images, skipped saves, unbounded caches).
 
-**Advisor rules.** The implementer gets the Advisor from the global pi-advisor config. Do not change
-`advisor.json`: it is the user's setting. `preflight.sh` prints a `WARN` line if the Advisor is off, or if it is
-the implementer model (pi-advisor then skips every call, unless `advisorDisableSameModel` is false). Continue,
-and put the warning in the summary. The reviewers must use only their own model: `start-review.sh` passes
-`--exclude-tools ask_advisor,record_advisor_outcome`, which removes the tool, the prompt rules and the
-automatic gates. Keep that flag.
+**Advisor rules.** The implementer gets the Advisor from the global pi-advisor config: omit `advisor` when
+starting it via `herdr_subagent`. Do not change `advisor.json`: it is the user's setting. `preflight.sh`
+prints a `WARN` line if the Advisor is off, or if it is the implementer model (pi-advisor then skips every
+call, unless `advisorDisableSameModel` is false). Continue, and put the warning in the summary. The reviewers
+must use only their own model: pass `advisor: false` to `herdr_subagent` (or `--exclude-tools
+ask_advisor,record_advisor_outcome` in fallback mode), which removes the tool, the prompt rules and the
+automatic gates.
 
 **Check that the Advisor is used, not only available.** The declaration alone is not enough: workers whose
 brief did not mention the Advisor called it about once per ticket (the completion gate). Count the calls in
-the pane's session (`grep -o '"toolName":"ask_advisor"' <session.jsonl> | wc -l`) or read the pi footer
-(`Advisor: N calls`). In the first prompt, name the decisions that deserve a consult. If a worker on a large
-ticket has not called it after an hour, send a steering prompt that names the decisions.
+the worker's session (`sessionFile` from `herdr_subagent status`: `grep -o '"toolName":"ask_advisor"'
+<session.jsonl> | wc -l`) or read its footer (`Advisor: N calls`). In the first prompt, name the decisions
+that deserve a consult. Note that `herdr_subagent send` rejects prompts while a worker is busy (HTTP 409), so
+set expectations up front; if a worker on a long ticket still needs a mid-run nudge, tell the user to open its
+tab (click the card or `/subagents <id>`).
 
 ## One-time setup
 
@@ -128,22 +138,30 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
    Pitfalls). Keep the `WARN` lines for the summary.
 2. **Claim the ticket** (tracker tickets only): `save_issue({id, assignee: "me", state: "In Progress"})`, then
    `get_issue` to confirm it (the update can silently not apply; repeat it).
-3. **Start the implementer.** `$S/start-ticket.sh $T $BASE "<ticket-specific guidance>"`.
+3. **Start the implementer.** Confirm the tree is clean, read `Suggested branch:` from `$PR_WORK/$T.md`, and
+   create the branch: `git checkout -q "$BASE" && git checkout -q -b "$BRANCH"`.
+   Then call `herdr_subagent` with `action: "start"`, `name: "$T"`, `model: <IMPLEMENTER_MODEL>`, `cwd: <REPO>`
+   (omit `advisor` so global Advisor settings apply), and prompt:
+   `Read $PR_WORK/BRIEF.md first and follow it exactly. Your ticket: $PR_WORK/$T.md ($T). You are on branch $BRANCH, created from $BASE (see git log --oneline for earlier work in a stack). Your PR will target $BASE. <ticket-specific guidance>`
    Give specific guidance: the risky call sites, what to characterize before the change, the prerequisites
    that earlier PRs already provide, the decisions to take to the Advisor, and what not to do (out-of-scope
-   follow-ups). Use the pane id that the script prints; never guess it.
-4. **Wait.** `$S/wait-done.sh $T`. It prints progress every 5 minutes. Exit codes: 0 done; 3 its own
-   time limit (call it again); 5 the agent is idle without the signal file (it stopped early: an API
-   error, a question, or a BLOCKED report; the script shows its screen); 1 the pane closed (pi exited).
-   Large tickets take 1 to 3 hours. Wait with long bash timeouts (about 3500 s) and loop. Do not poll
-   every minute.
+   follow-ups). Save the returned worker ID in `$PR_WORK/$T-worker` (it also stays in `herdr_subagent list`).
+4. **Wait.** Call `herdr_subagent({ action: "wait", id: <worker-id>, timeoutSeconds: 600 })`.
+   Large tickets take 1 to 3 hours: whenever `wait` returns `"timedOut": true`, call `wait` again. Never
+   re-call `start` or `send` after a timeout (a timeout ends only the wait, not the worker).
+   When `wait` settles:
+   - `blocked`: tell the user to open the tab (click the card or `/subagents <id>`).
+   - `failed`, `aborted`, or `disconnected`: inspect `output` and `sessionFile` before deciding next steps.
+   - `completed`: this means Pi finished responding, not that the work is complete. Verify the deliverables in
+     step 5; if `$PR_WORK/$T-report.md`, `$PR_WORK/$T-pr.md`, or commits are missing (or the worker asked a
+     question), `send` a follow-up once idle and `wait` again.
 5. **Validate.** Read `$PR_WORK/$T-report.md`. Check `git status` (clean), `git log --format='%h %G? %s'
    $BASE..HEAD` (all commits signed: `G`), and look at the key production diffs yourself. Look for
    left-over secrets: `find $PR_WORK /tmp -name '*env*'`.
    Check the tests too ("Test coverage" in the brief): a characterization-test commit comes before the change
    (or the report says why there is none), the report lists the new tests and what each one protects, gives
    the mutation-check result, and shows that the tests ran. If tests are missing or weak, send the
-   implementer back before review pass 1.
+   implementer back with `herdr_subagent send` + `wait` before review pass 1.
 6. **Review pass 1, before the PR.** Run one round for each reviewer (see "A review round"). The fixes stay
    local commits.
 7. **Open the PR.** Read `$PR_WORK/$T-pr.md`. It must be short (see "PR descriptions"); if it is not, ask
@@ -151,36 +169,49 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
    under `## Reviews`. Then `$S/create-pr.sh $T $BASE` (it refuses a dirty tree and em dashes, pushes, checks
    that the remote head equals HEAD, and opens the PR against `BASE`). Set a tracker ticket to "In Review".
 8. **CI until green.** `$S/wait-pr.sh <PR> 80 --review` (the first time only: it also waits for the
-   automated review). On a failure, see "CI failures": send the fix to the implementer, `$S/push-check.sh`,
+   automated review). On a failure, see "CI failures": make sure the implementer is idle, `send` the fix
+   prompt via `herdr_subagent`, `wait` until settled, verify commits and clean tree, `$S/push-check.sh`,
    and `$S/wait-pr.sh <PR> 80` again. Do not continue while any check is red.
 9. **PR feedback.** `$S/fetch-feedback.sh $T` writes `$PR_WORK/$T-feedback.md` (the automated review and
    comments from people; it leaves out our own replies). Do not wait for people who have not reviewed yet.
-   If there is feedback, send the implementer ONE prompt with `$S/prompt.sh <pane> "..."`: name the file,
-   say for each item whether to fix it or to reply only, ask for NEW commits, a replies file
-   `$PR_WORK/$T-replies.md` (format in the brief; inline replies are for the inline comment ids), an updated
-   PR description if material, and, as the very last action, `touch $PR_WORK/$T-feedback-done`. Then
-   `$S/wait-done.sh $T feedback-done`, check the diff, `$S/push-check.sh`,
-   `gh pr edit <PR> --body-file $PR_WORK/$T-pr.md`, and `$S/post-replies.py $T` (it posts the top-level
-   reply and one reply to each inline comment; it skips `## follow-ups`). For a later feedback round, use
-   `$T-replies2.md` and `$S/post-replies.py $T <PR> $PR_WORK/$T-replies2.md`.
+   If there is feedback, make sure the implementer is idle and send it ONE prompt with
+   `herdr_subagent({ action: "send", id: <worker-id>, prompt: "..." })`: name the file, say for each item
+   whether to fix it or to reply only, ask for NEW commits, a replies file `$PR_WORK/$T-replies.md` (format
+   in the brief; inline replies are for the inline comment ids), and an updated PR description if material.
+   Then `herdr_subagent wait` until settled, confirm `$PR_WORK/$T-replies.md` and new signed commits exist,
+   check the diff, `$S/push-check.sh`, `gh pr edit <PR> --body-file $PR_WORK/$T-pr.md`, and
+   `$S/post-replies.py $T` (it posts the top-level reply and one reply to each inline comment; it skips
+   `## follow-ups`). For a later feedback round, use `$T-replies2.md` and
+   `$S/post-replies.py $T <PR> $PR_WORK/$T-replies2.md`.
 10. **Review pass 2.** Run one round for each reviewer again. Then, while the last round had high or medium
-    findings that changed code, run one more round (`start-review.sh` takes the next reviewer). Stop when a
-    round has no high or medium finding to fix. After 3 extra rounds, stop and put the open findings in the
-    summary. If HEAD did not change since the last review round of pass 1 (no CI fix and no feedback fix),
+    findings that changed code, run one more round (`start-review.sh --prepare` picks the next reviewer). Stop
+    when a round has no high or medium finding to fix. After 3 extra rounds, stop and put the open findings in
+    the summary. If HEAD did not change since the last review round of pass 1 (no CI fix and no feedback fix),
     skip pass 2 and say so in the summary.
 11. **Push and CI until green again.** `$S/push-check.sh`, `$S/review-summary.sh $T --update-pr`,
     `gh pr edit <PR> --body-file $PR_WORK/$T-pr.md`, and `$S/wait-pr.sh <PR> 80`, as in step 8. If a CI fix
     now changes production code, run one more review round. NEVER conclude a PR while a check is red or pending.
-12. **Close out.** `$S/close-panes.sh $T` (closes only the panes that this run recorded for the ticket;
-    never close the user's own panes), mark the ticket done in `ORDER.txt`, and print the PR summary (below).
+12. **Close out.** Close each idle worker created for this ticket (implementer in `$PR_WORK/$T-worker` and
+    reviewers recorded as `sub:<id>` in `$PR_WORK/$T-reviews.tsv`, or found via `herdr_subagent list`) with
+    `herdr_subagent({ action: "close", id })`. Unlike standalone `/skill:review`, `pr-workflow` closes its own
+    reviewer and implementer tabs at close-out. `close` only removes original panes that confirm they are
+    idle; never close the user's own tabs. Mark the ticket done in `ORDER.txt`, and print the PR summary (below).
 13. **Next item.** If the user gave a list, start the next ticket at once, with `BASE` = this ticket's branch
     (or the default branch, see "Defaults"). After the last item, print a table of all PRs.
 
 ### A review round
 
-1. `$S/start-review.sh $T $BASE`, then `$S/wait-review.sh $T`. The script picks the round number and the
-   reviewer. It records each round in `$PR_WORK/$T-reviews.tsv`. If a report says "No issues found" with no
-   "What I checked" section, ask for evidence before you trust it.
+1. Run `$S/start-review.sh --prepare $T $BASE`. It checks for a non-empty diff, writes the diff, commit log,
+   and prompt (including earlier reports and PR feedback, without a done signal), appends the round to
+   `$PR_WORK/$T-reviews.tsv`, and prints `round`, `model`, `id`, `prompt`, and `output`.
+   Start the reviewer with `herdr_subagent({ action: "start", name: "$T-r$ROUND", model: <model>, advisor: false, cwd: <REPO>, prompt: <contents of prompt file> })`,
+   then record its worker ID: `$S/start-review.sh --set-worker $T $ID <worker-id>`. (If `start` fails, retry
+   `start` with the same prepared prompt file rather than re-running `--prepare`, which would advance the round.)
+   Wait with `herdr_subagent({ action: "wait", id: <worker-id>, timeoutSeconds: 600 })` (loop on `timedOut: true`).
+   When `completed`, confirm the output file (`$PR_WORK/review/$ID-output.md`) exists and is non-empty; if
+   missing, check `output` or `send` a follow-up asking it to write the file and `wait` again. If a report
+   says "No issues found" with no "What I checked" section, follow up with `send` + `wait` for evidence before
+   you trust it.
 2. Sort the findings:
    - Fix: real bugs, test gaps, robustness, small cleanups in the touched code.
    - Reply only (post-PR) or note in the summary (pre-PR): pre-existing problems, product decisions, and large
@@ -189,9 +220,9 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
      review (it once called real formatter output "reconstructed" because it could not run the formatter).
      When a reviewer contradicts the implementer, or two reviews disagree, settle it with a reproduction or
      a tool run, not by majority. Ask the implementer to verify a contested claim before it changes code.
-3. If there is something to fix, send the implementer ONE prompt with `$S/prompt.sh <pane> "..."`: the report
-   path, the items to fix, NEW commits, and, as the very last action, `touch $PR_WORK/$T-fix-r<N>-done` (N is
-   the round). Then `$S/wait-done.sh $T fix-r<N>-done`, and check the fix diff.
+3. If there is something to fix, make sure the implementer is idle and send it ONE prompt with
+   `herdr_subagent({ action: "send", id: <worker-id>, prompt: "..." })`: the report path, the items to fix,
+   and NEW commits. Then `herdr_subagent wait` until settled, and check the fix diff and commits.
 4. Start the next round only after the fixes are done. A round with no findings to fix needs no prompt.
 
 ### The PR summary
@@ -222,7 +253,7 @@ tag in another repository, a deploy, an infra change), park it in `ORDER.txt` wi
 next ticket, and list it under "Needs you". Work that you cannot verify locally (for example a staging
 deploy) goes under "Manual checks still needed" with the exact commands.
 
-If the user asks you to pause: finish the current PR to green, close the panes, and give a status summary
+If the user asks you to pause: finish the current PR to green, close the worker tabs, and give a status summary
 (PR table, follow-up tickets filed, what needs the user, the next ticket).
 
 ## CI failures
@@ -246,42 +277,15 @@ Run `$S/ci-failures.sh <PR>` first (or `$S/ci-failures.sh job:<N>` for one job).
 Check the commit statuses of recent `main` commits to see if a check is already red there:
 `gh api repos/<owner>/<repo>/commits/<sha>/statuses`.
 
-## herdr + pi: what works
+## Fallback: manual panes without `herdr_subagent`
 
-- **Start pi with its first prompt as a positional message** (the method of the `review` skill):
-  `herdr pane split --pane "$HERDR_PANE_ID" --direction right --cwd <repo> --no-focus`, write a runner
-  script `exec pi --model <provider/model> --thinking high "$(cat <prompt file>)"`, then
-  `herdr pane run <pane> "exec <runner>"`. `launch_pi` in `common.sh` does this. The first prompt cannot
-  get lost, the command line stays short, and the pane closes when pi exits. herdr still detects pi in the
-  pane, so `herdr agent prompt <pane>` works for later rounds.
-- Do not use `herdr agent start` + an immediate `herdr agent prompt` for the first prompt: right after a
-  start, prompts were rejected (`agent_not_found`, `agent_prompt_stalled`), and a rejected prompt is not
-  delivered.
-- **Target agents by pane id, not by name.** herdr loses agent names (`agent_not_found`). Pane ids stay
-  stable.
-- For later prompts, `herdr agent prompt` needs `--wait` before `--timeout`. Use `prompt.sh`, which tries
-  again until the agent is `working`.
-- A prompt to an agent that is already working is queued by pi as a steering message (the screen shows
-  "Steering: ..."), and herdr reports a timeout. It is delivered at the next tool boundary. Do not send it
-  again; `prompt.sh` sends it once in that case. Use this for nudges during long tickets (for example "take
-  this decision to the Advisor").
-- Do not trust herdr status alone. It can stay `working` long after the agent stopped, or show `done` before
-  the last file writes. Use signal files plus a stable status (`wait-done.sh`).
-- A closed pane: `herdr pane get` fails with error code `pane_not_found`. Other herdr errors can be short
-  failures, so count a pane as closed only after 3 `pane_not_found` results in a row (`pane_gone` in
-  `common.sh`).
-- To see what an agent does: `herdr pane read <pane> --source visible` (or `recent-unwrapped --lines 80`;
-  `pane read` works while pi is busy, but `herdr agent read` with `--lines` fails then). For tool-call
-  detail, read its pi session JSONL (`herdr pane get <pane> | jq -r .result.pane.agent_session.value`).
-- **A bad model id does not make pi exit.** pi shows the API error (`model_not_found`) and stays idle.
-  `wait_working` catches it from the screen. Resolve ids with `resolve-model.sh` (see "Defaults") before a
-  run, and do not let pi pick one from a short name: `pi --model <short name>` takes the first catalog match,
-  which is a Bedrock id, so the provider preference is lost. `preflight.sh` then checks that each configured
-  id is listed and ready.
-- Only close the panes you made. The user can have panes of their own in the same workspace.
-- To confirm the Advisor setup in a pane, look for an `ask_advisor` tool declaration in its pi session JSONL
-  (`herdr pane get <pane> | jq -r .result.pane.agent_session.value`). The implementer has it when the Advisor is
-  enabled, the reviewers must not.
+If `herdr_subagent` is not installed, use the pane scripts in `scripts/` instead:
+
+- **Start / wait implementer:** `$S/start-ticket.sh $T $BASE "<guidance>"` (splits a pane, writes `$PR_WORK/$T-pane`, launches `pi` with a positional prompt and `--thinking "$THINKING"`, expects `touch $PR_WORK/$T-done`), then `$S/wait-done.sh $T` (exit 0 done, 3 timeout/call again, 5 idle without signal, 1 pane closed).
+- **Review round:** `$S/start-review.sh $T $BASE` (without `--prepare`; splits a pane, passes `--exclude-tools ask_advisor,record_advisor_outcome`, expects `touch ...-done`), then `$S/wait-review.sh $T`.
+- **Follow-ups:** `$S/prompt.sh <pane> "<prompt> As your very last action, touch $PR_WORK/$T-<signal>."` then `$S/wait-done.sh $T <signal>`. `prompt.sh` sends once as a steering message if already working, or retries until `working`.
+- **Close out:** `$S/close-panes.sh $T` (closes only recorded panes, skipping `sub:*` entries and `$HERDR_PANE_ID`).
+- **Key fallback gotchas:** always target panes by pane ID (not agent name), use signal files plus stable status (Herdr status alone can lag), count a pane closed only after 3 consecutive `pane_not_found` errors (`pane_gone`), and inspect panes with `herdr pane read <pane> --source recent-unwrapped --lines 80` or the session JSONL (`herdr pane get <pane> | jq -r .result.pane.agent_session.value`). Always pass resolved full `provider/model` IDs: `pi` resolves short names to the first catalog match and does not exit on `model_not_found`.
 
 ## Pitfalls (each one cost time before)
 

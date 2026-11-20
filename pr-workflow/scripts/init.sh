@@ -38,6 +38,8 @@ IMPLEMENTER_MODEL="$IMPLEMENTER_MODEL"
 # The reviewers, in order. Review round N uses the reviewer at position
 # (N-1) modulo the count, so each pass runs every reviewer once, in order.
 REVIEWER_MODELS="$REVIEWER_MODELS"
+# Thinking level for fallback scripts (herdr_subagent inherits the
+# orchestrator session's current thinking level).
 THINKING="high"
 # The GitHub check of the automated PR review. Set it to "" if the
 # repository has no automated review.

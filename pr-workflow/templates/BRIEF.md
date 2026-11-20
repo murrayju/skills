@@ -94,7 +94,9 @@ Add automated tests around every feature that the change touches, to show that b
 4. A short report in `$PR_WORK/<TICKET>-report.md`: what changed, what was verified (commands and results), the
    new tests and what each one protects, the mutation check result, what is left undone or risky, and the
    decisions taken.
-5. As your very last action, `touch` the signal file that your prompt names. Write all files BEFORE the signal.
+5. Write all deliverables and finish all commits before your final reply. Only if your prompt names a signal
+   file (fallback mode without `herdr_subagent`), `touch` it as your very last action after all files and
+   commits are written.
 
 ## Later rounds
 

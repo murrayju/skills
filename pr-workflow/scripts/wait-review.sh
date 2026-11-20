@@ -7,6 +7,9 @@ source "$(dirname "$0")/common.sh"
 LAST=$(tail -1 "$PR_WORK/$1-reviews.tsv" 2>/dev/null)
 [ -n "$LAST" ] || { echo "no review round in $PR_WORK/$1-reviews.tsv"; exit 1; }
 ID=$(echo "$LAST" | cut -f3); PANE=$(echo "$LAST" | cut -f4)
+case "$PANE" in
+  ""|"-"|sub:*) echo "round $ID uses herdr_subagent ($PANE), not a manual pane: use herdr_subagent wait" >&2; exit 1 ;;
+esac
 R="$PR_WORK/review"; MAX="${2:-55}"; misses=0
 for _ in $(seq 1 $(( MAX * 12 ))); do
   [ -f "$R/$ID-done" ] && break

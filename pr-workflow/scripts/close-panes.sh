@@ -11,7 +11,7 @@ for f in "$PR_WORK"/$PATTERN-pane "$PR_WORK"/$PATTERN-reviews.tsv; do
   [ -f "$f" ] || continue
   case "$f" in *.tsv) panes=$(cut -f4 "$f") ;; *) panes=$(cat "$f") ;; esac
   for p in $panes; do
-    [ "$p" != "$HERDR_PANE_ID" ] || continue
+    case "$p" in ""|"-"|sub:*|"${HERDR_PANE_ID:-}") continue ;; esac
     if herdr pane close "$p" >/dev/null 2>&1; then echo "closed $p"; fi
   done
   # Keep the review log: review-summary.sh reads it.
