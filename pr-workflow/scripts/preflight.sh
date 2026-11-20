@@ -37,5 +37,14 @@ else
   echo "advisor: ok ($adv_model)"
 fi
 gh auth status >/dev/null 2>&1 && echo "gh: ok" || { echo "gh: not logged in"; ok=0; }
+if command -v gh >/dev/null 2>&1; then
+  gh_exts=$(gh extension list 2>/dev/null) || true
+  gh_stack_ver=$(printf '%s\n' "$gh_exts" | awk -F'\t' 'tolower($2) == "github/gh-stack" { print $3; exit }')
+  if [ -n "$gh_stack_ver" ]; then
+    echo "gh-stack: ok ($gh_stack_ver)"
+  else
+    echo "WARN: gh-stack: not installed (run 'gh extension install github/gh-stack')"
+  fi
+fi
 [ -z "$(git status --porcelain)" ] && echo "tree: clean ($(git branch --show-current))" || { echo "tree: DIRTY"; git status --short | head; ok=0; }
 [ "$ok" = 1 ] || exit 1

@@ -24,7 +24,8 @@ loads when the skill is invoked.
   reviewer models reviews it before the PR opens, then CI goes green, the PR
   feedback is addressed, and the reviewers run again until no high or medium
   findings remain. A list of tickets (for example a Linear epic) repeats the
-  loop as stacked PRs. Includes helper scripts and a subagent brief template.
+  loop as stacked PRs managed with `gh stack` so the stack can be reviewed and
+  merged all at once. Includes helper scripts and subagent brief templates.
 
 ## Shared scripts
 

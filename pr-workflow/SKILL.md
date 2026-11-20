@@ -38,7 +38,7 @@ Do not ask questions about the workflow. Use these defaults, and change one only
 | scope | what the prompt names: one task, one ticket, a list, or the open sub-issues of an epic |
 | base branch | the default branch for the first PR; the previous PR's branch for each later item of a list |
 | actions outside the repo | not authorized: publishing, release tags, deploys, infra changes. Park and continue |
-| merges | never merge. The user merges (squash) |
+| merges | never merge. The user reviews the PR (or the whole stack) and merges it all at once |
 | pauses | none between items. Stop only for a real blocker (see below) |
 
 Using this skill is the explicit request to push branches and open PRs.
@@ -151,8 +151,13 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
    Pitfalls). Keep the `WARN` lines for the summary.
 2. **Claim the ticket** (tracker tickets only): `save_issue({id, assignee: "me", state: "In Progress"})`, then
    `get_issue` to confirm it (the update can silently not apply; repeat it).
-3. **Start the implementer.** Confirm the tree is clean, read `Suggested branch:` from `$PR_WORK/$T.md`, and
-   create the branch: `git checkout -q "$BASE" && git checkout -q -b "$BRANCH"`.
+3. **Start the implementer.** Confirm the tree is clean and read `Suggested branch:` from `$PR_WORK/$T.md`.
+   Create and check out `$BRANCH`:
+   - For a single PR (or an unstacked PR): `git checkout -q "$BASE" && git checkout -q -b "$BRANCH"`.
+   - For a stacked PR when `gh stack` is installed: ensure `git config --local rerere.enabled true` (avoids
+     an interactive prompt on `init`), then for the first PR in the stack run
+     `gh stack init --base "$BASE" "$BRANCH"`, and for each later PR in the stack run `gh stack top` then
+     `gh stack add "$BRANCH"`. (See "Stacked PR mechanics".)
    Then call `herdr_subagent` with `action: "start"`, `name: "$T"`, `model: <IMPLEMENTER_MODEL>`, `cwd: <REPO>`
    (omit `advisor` so global Advisor settings apply), and prompt:
    `Read $PR_WORK/BRIEF.md first and follow it exactly. Your ticket: $PR_WORK/$T.md ($T). You are on branch $BRANCH, created from $BASE (see git log --oneline for earlier work in a stack). Your PR will target $BASE. <ticket-specific guidance>`
@@ -194,7 +199,9 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
    `$PR_WORK/$T-pr.md` for the final state (and update docs if needed). Run `$S/review-summary.sh $T
    --update-pr` to put the table of review rounds under `## Reviews`. Then `$S/create-pr.sh $T $BASE` (it
    refuses a dirty tree and em dashes, pushes, checks that the remote head equals HEAD, and opens the PR
-   against `BASE`). Set a tracker ticket to "In Review".
+   against `BASE`). If this is the 2nd or later PR in a stack and `gh stack` is installed, link the open PRs
+   into a GitHub Stack with `gh stack link <pr1> <pr2> ...` (using the explicit PR numbers in bottom-to-top
+   order from `$PR_WORK/*-pr-number`; see "Stacked PR mechanics"). Set a tracker ticket to "In Review".
 9. **CI until green.** `$S/wait-pr.sh <PR> 80 --review` (the first time only: it also waits for the
    automated review). On a failure, see "CI failures": make sure the implementer is idle, `send` the fix
    prompt via `herdr_subagent`, `wait` until settled, verify commits and clean tree, `$S/push-check.sh`,
@@ -229,7 +236,9 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
     only removes original panes that confirm they are idle; never close the user's own tabs. Mark the ticket
     done in `ORDER.txt`, and print the PR summary (below).
 14. **Next item.** If the user gave a list, start the next ticket at once, with `BASE` = this ticket's branch
-    (or the default branch, see "Defaults"). After the last item, print a table of all PRs.
+    (or the default branch, see "Defaults"). After the last item, print a table of all PRs; for a stack,
+    confirm the linked stack with `gh stack view --json` and note that the user can review and merge the
+    whole stack at once.
 
 ### A review round
 
@@ -363,27 +372,54 @@ If `herdr_subagent` is not installed, use the pane scripts in `scripts/` instead
   checkout). To lint or typecheck there, symlink `node_modules` from the main checkout, and delete the
   symlinks before you commit.
 
-## Stacked PR mechanics
+## Stacked PR mechanics (`gh stack`)
 
-- Each PR targets the previous ticket's branch, so the PR diff shows only that ticket. The base branch must
-  be pushed before you open the PR.
-- Never amend or force-push a pushed branch unless the user asks. Fixes are new commits.
-- With squash merges, when the bottom PRs merge, the next PR must be retargeted to `main` and its branch
-  rebased onto `main`. That needs a force-push, so ask the user first ("please rebase" counts as yes). Steps:
-  1. `git fetch --prune`. Record the old tip of every unmerged branch before you start.
-  2. Check that the squash commit of the last merged PR has the content of its old branch tip:
-     `git diff <old tip of last merged branch> <its squash commit on main>` must show only changes that
-     other PRs made to `main` meanwhile.
-  3. Rebase the first unmerged branch: `git rebase --onto origin/main <old tip of last merged branch>
-     <branch>`. Then each child: `git rebase --onto <new parent tip> <old parent tip> <child>`.
-  4. Check each result: every commit is still signed (`%G?` is `G`), and `git diff <old tip> <new tip>`
-     equals the change on `main` (`git diff <old main> origin/main`).
-  5. Push each with `git push --force-with-lease=<branch>:<old tip sha>`, and check that the remote head
-     equals the local head. GitHub retargets a PR to `main` when its base branch is deleted; confirm with
-     `gh pr view <PR> --json baseRefName,mergeable`.
-  6. If the implementer is working in the checkout, rebase the other branches in a `git worktree`, and
-     rebase the implementer's branch only after it is done (before review). An unpushed branch needs no
-     force-push.
+Stacked PRs are meant for the **human to review the entire stack together and merge all of it at once** using
+GitHub Stacked PRs (in GitHub's stack UI or via `gh stack merge`). Do not assume the user will merge PRs one
+at a time or ask them to manually rebase between merges. Never run `gh stack merge` yourself: the user merges.
+
+Use the official GitHub CLI extension `gh stack` (`github/gh-stack`) to track and link stacks:
+
+- **Creating layers:**
+  - Set `git config --local rerere.enabled true` once in the repo so `gh stack init` does not prompt under a TTY.
+  - First PR of the stack (on trunk `$BASE`): `gh stack init --base "$BASE" "$BRANCH"`.
+  - Each later PR in the stack (on top of the previous PR): `gh stack top`, then `gh stack add "$BRANCH"`.
+  - Keep all stack branches in one worktree. (`gh stack checkout` and `gh stack rebase` fail if a target
+    branch is checked out in another worktree, or require that worktree to be clean.)
+- **Linking PRs on GitHub:**
+  - Open each PR with `$S/create-pr.sh $T $BASE` so it keeps the exact title and `scribe` description. Do not
+    use `gh stack submit --auto` to create PRs, because it auto-generates titles and descriptions.
+  - Starting at the 2nd PR in the stack, link the open PRs in bottom-to-top order by explicit PR number:
+    `gh stack link <pr1> <pr2> ...` (or `gh stack link <stack-number> <new-pr>` to append to an existing
+    stack). Pass `--remote origin` if the repo has multiple remotes without `remote.pushDefault` set.
+  - `gh stack link` is additive, preserves existing PR titles and bodies, and corrects base chaining if needed.
+  - If the repository does not have GitHub Stacked PRs enabled (exit code 9), the PRs still remain open and
+    chained by `--base`: continue normally and note it under "Needs you".
+- **Non-interactive safety (important under a PTY):**
+  - Always pass explicit flags/arguments: `gh stack view --json` (parse stdout only), `gh stack init --base
+    <trunk> <branch>`, `gh stack add <branch>`, `gh stack checkout <branch|pr|stack>`, `gh stack
+    up/down/top/bottom`.
+  - Never run bare `gh stack view`, `gh stack submit`, `gh stack init`, `gh stack add`, `gh stack checkout`,
+    `gh stack switch`, or `gh stack modify`: they open interactive prompts or TUIs and block.
+  - Set `GH_STACK_NO_UPDATE_NOTIFIER=1` when scripts parse stderr.
+- **Restacking or syncing (only when requested):**
+  - Never amend or force-push a pushed branch unless the user asks. Because PRs in a stack are built and
+    taken to green one at a time from bottom to top, normal stack creation never needs force-pushes.
+  - If the user asks to edit a lower PR after upper PRs are already pushed, confirm before force-pushing the
+    already-pushed upstack branches (an explicit request to restack or rebase counts as yes). Check out the
+    lower layer (`gh stack checkout <branch>`), add a NEW signed commit, run `gh stack rebase --upstack
+    --no-trunk`, verify every rewritten commit across all upstack layers is still signed
+    (`git log --format='%h %G? %s' <trunk>..<top>` must show `G` for every commit), push atomically with
+    `gh stack push` (uses `--force-with-lease`), and return with `gh stack top`.
+  - If the user explicitly asks to sync the stack with an updated trunk or after partial merges, run
+    `gh stack sync` (add `--prune` only if they want merged local branches deleted), then verify all
+    remaining commits are still signed (`%G?` is `G`).
+  - On a rebase conflict (exit code 3), stop and report rather than blindly trusting stale `rerere`
+    resolutions (`gh stack sync` restores all branches automatically; `gh stack rebase --abort` restores
+    them).
+- **Fallback without `gh stack`:** if `gh stack` is not installed, create branches with `git checkout -q
+  "$BASE" && git checkout -q -b "$BRANCH"` and open each PR with `$S/create-pr.sh $T $BASE` (GitHub still
+  chains them by `--base`, just without a Stack object).
 - A fix that every PR needs (for example a CI flake) belongs in its own small PR off `main`, not in the stack.
 
 ## Tracker hygiene (Linear)
