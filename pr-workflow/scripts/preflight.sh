@@ -10,8 +10,12 @@ if [ "$(git config --get commit.gpgsign)" = true ]; then
   echo test | gpg --clearsign >/dev/null 2>&1 && echo "gpg: ok" || { echo "gpg: SIGNING FAILS (ask the user to unlock gpg)"; ok=0; }
 fi
 [ -n "${IMPLEMENTER_MODEL:-}" ] || { echo "config: IMPLEMENTER_MODEL is not set in $PR_WORK/config.env"; ok=0; }
+[ -n "${SCRIBE_MODEL:-}" ] || { echo "config: SCRIBE_MODEL is not set in $PR_WORK/config.env"; ok=0; }
 [ -n "${REVIEWER_MODELS:-}" ] || { echo "config: REVIEWER_MODELS is not set in $PR_WORK/config.env"; ok=0; }
-for m in ${IMPLEMENTER_MODEL:-} ${REVIEWER_MODELS:-}; do
+checked_models=" "
+for m in ${IMPLEMENTER_MODEL:-} ${SCRIBE_MODEL:-} ${REVIEWER_MODELS:-}; do
+  case "$checked_models" in *" $m "*) continue ;; esac
+  checked_models="$checked_models$m "
   r=$(pi auth check --provider "${m%%/*}" --model "${m#*/}" 2>&1 | tail -1)
   listed=$(pi --list-models "${m#*/}" 2>/dev/null | awk -v p="${m%%/*}" -v id="${m#*/}" '$1==p && $2==id' | wc -l)
   if [ "$r" = ready ] && [ "$listed" -ge 1 ]; then echo "model $m: ok"; else echo "model $m: NOT READY ($r, listed=$listed)"; ok=0; fi

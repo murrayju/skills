@@ -19,11 +19,12 @@ loads when the skill is invoked.
 
 - **pr-workflow**: Take a task or ticket to a green PR. The agent stays the
   orchestrator: a fresh pi subagent in a named Herdr tab (`herdr_subagent`,
-  with manual split-pane fallback) implements the work, a sequence of reviewer
-  models reviews it before the PR opens, then CI goes green, the PR feedback is
-  addressed, and the reviewers run again until no high or medium findings
-  remain. A list of tickets (for example a Linear epic) repeats the loop as
-  stacked PRs. Includes helper scripts and a subagent brief template.
+  with manual split-pane fallback) implements the work, a `scribe` subagent
+  composes human-facing text (PR descriptions and documentation), a sequence of
+  reviewer models reviews it before the PR opens, then CI goes green, the PR
+  feedback is addressed, and the reviewers run again until no high or medium
+  findings remain. A list of tickets (for example a Linear epic) repeats the
+  loop as stacked PRs. Includes helper scripts and a subagent brief template.
 
 ## Shared scripts
 

@@ -20,7 +20,8 @@ Do NOT push, do NOT create PRs, do NOT switch branches. The correct branch is al
 - <Repo-specific rules. Examples: the dependency age gate and how to pick versions; package manager commands;
   "run yarn dedupe and keep dedupe --check clean"; "do not change unrelated lockfile entries".>
 - If the ticket is ambiguous or needs a product or infra decision, choose the safest reasonable option, implement
-  it, and flag it in the PR description under "Decisions and open questions".
+  it, and flag it in your report under "Decisions and open questions" (for the `scribe` to include in the PR
+  description).
 - Do not act outside the repository: no publishing, release tags, deploys or infra changes. Prepare the change,
   and list the step with exact commands under "Manual checks still needed" or "Decisions and open questions".
 - If part of the ticket is impossible now (blocked upstream, needs infra), do what you can, document the rest, and
@@ -65,7 +66,8 @@ Add automated tests around every feature that the change touches, to show that b
 - Before you write a verifier, look for the tool's own check (for example `prettier --debug-check`). A
   hand-written checker is code that must be correct and maintained.
 - List the new tests and what each one protects in the report. List the visual or manual QA that you could not
-  automate under "Manual checks still needed" in the PR description.
+  automate in your report under "Manual checks still needed" (for the `scribe` to include in the PR
+  description).
 
 ## Committing
 
@@ -79,31 +81,24 @@ Add automated tests around every feature that the change touches, to show that b
 
 ## Deliverables
 
-1. Commits on the current branch (not pushed).
+1. Commits on the current branch (not pushed). Focus on code and tests; leave substantial human-facing
+   documentation updates and the PR description to the `scribe` subagent (give it clear notes in your report).
 2. PR title in `$PR_WORK/<TICKET>-pr-title.txt` (one line, conventional-commit style; for a tracker ticket it ends
    with ` (<TICKET>)`).
-3. PR description in `$PR_WORK/<TICKET>-pr.md`. Keep it short. Use the repository PR template if there is one.
-   Describe what changed and why, as the final state of the code. Do not describe the steps, attempts, commands
-   or review rounds that got you there: they go in the report. Sections, in this order:
-   - A summary: a few bullets on what changed and why. One bullet can name the new test coverage.
-   - "Decisions and open questions": the choices you made, and what a reviewer should think about. Omit if none.
-   - "Manual checks still needed": exact steps. Omit if none.
-   - `## Reviews`, with no content. The orchestrator fills it with the table of review rounds.
-   - `Closes <TICKET>` for a tracker ticket.
-   No em dashes.
-4. A short report in `$PR_WORK/<TICKET>-report.md`: what changed, what was verified (commands and results), the
-   new tests and what each one protects, the mutation check result, what is left undone or risky, and the
-   decisions taken.
-5. Write all deliverables and finish all commits before your final reply. Only if your prompt names a signal
+3. A short report in `$PR_WORK/<TICKET>-report.md`: what changed and why, what was verified (commands and
+   results), the new tests and what each one protects, the mutation check result, what is left undone or
+   risky, the decisions and open questions for reviewers, manual checks still needed, and any notes or
+   instructions for the `scribe` (for composing `$PR_WORK/<TICKET>-pr.md` and updating user-facing docs).
+4. Write all deliverables and finish all commits before your final reply. Only if your prompt names a signal
    file (fallback mode without `herdr_subagent`), `touch` it as your very last action after all files and
    commits are written.
 
 ## Later rounds
 
 The orchestrator may send you reviewer findings, CI failures, or PR feedback (the automated review and comments
-from people) for the same ticket. Then: fix them on the same branch with NEW commits, update the PR description
-file if the change is material (keep it about the final state, not the history), and write replies to the file
-the orchestrator names, in this format:
+from people) for the same ticket. Then: fix them on the same branch with NEW commits, note any material
+changes that need a PR description or doc update by the `scribe`, and write replies to the file the
+orchestrator names, in this format:
 
 ```
 ## top-level

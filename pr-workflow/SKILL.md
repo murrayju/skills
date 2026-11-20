@@ -1,6 +1,6 @@
 ---
 name: pr-workflow
-description: Take work from a task or ticket to a green PR. You stay the orchestrator; a fresh pi subagent in a named Herdr tab via herdr_subagent (the current model, with the configured Advisor) implements it, a sequence of reviewer models (default neon, astra, fable; no Advisor) reviews it before the PR opens, then CI goes green, the PR feedback is addressed, and the reviewers run again until no high or medium findings remain. Falls back to manual Herdr split panes when herdr_subagent is not installed. Works for a single PR; a list of tickets (for example the sub-issues of a Linear epic) repeats the loop as stacked PRs. Do not ask the user about the workflow. Use when the user asks to implement a ticket or task as a PR, to work through tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
+description: Take work from a task or ticket to a green PR. You stay the orchestrator; a fresh pi subagent in a named Herdr tab via herdr_subagent (the current model, with the configured Advisor) implements it, a scribe subagent (default newest gemini neon, no Advisor) composes human-facing text like PR descriptions and documentation changes, a sequence of reviewer models (default neon, astra, fable; no Advisor) reviews it before the PR opens, then CI goes green, the PR feedback is addressed, and the reviewers run again until no high or medium findings remain. Falls back to manual Herdr split panes when herdr_subagent is not installed. Works for a single PR; a list of tickets (for example the sub-issues of a Linear epic) repeats the loop as stacked PRs. Do not ask the user about the workflow. Use when the user asks to implement a ticket or task as a PR, to work through tickets one at a time with subagents, herdr, stacked PRs, or "only move on when green".
 ---
 
 # PR workflow with herdr + pi subagents
@@ -10,11 +10,12 @@ You are the **orchestrator**. You do not write the feature code. For each PR you
 1. claim the ticket in the tracker (if there is one) and make its branch,
 2. start a fresh implementer subagent for that one ticket, which makes the change AND adds test coverage for
    it, and validate both,
-3. run the reviewers, one after the other, and get their findings fixed, BEFORE the PR opens,
-4. open the PR and take CI to green,
-5. address the PR feedback (the automated review and comments from people),
-6. run the reviewers again, and more rounds while the last round has high or medium findings to fix,
-7. take CI to green again, and print the PR summary.
+3. use the `scribe` subagent to compose any user-facing documentation changes and the PR description,
+4. run the reviewers, one after the other, and get their findings fixed, BEFORE the PR opens,
+5. open the PR and take CI to green,
+6. address the PR feedback (the automated review and comments from people),
+7. run the reviewers again, and more rounds while the last round has high or medium findings to fix,
+8. take CI to green again, and print the PR summary.
 
 The base case is ONE PR. A list of tickets (for example the sub-issues of an epic) is the same loop, once for
 each ticket, with each PR stacked on the previous one. After the summary of one PR, start the next item at
@@ -31,6 +32,7 @@ Do not ask questions about the workflow. Use these defaults, and change one only
 | -- | -- |
 | implementer | the model of the current pi session (`$PI_PROVIDER/$PI_MODEL`), in a named Herdr tab via `herdr_subagent`, one per ticket |
 | Advisor of the implementer | the global pi-advisor config (`~/.pi/agent/advisor.json`), as the user set it |
+| scribe | the newest `gemini neon` model (`init.sh` resolves it), in a named Herdr tab with `advisor: false`, for human-facing prose (PR descriptions, documentation) |
 | reviewers, in order | the newest `neon`, `astra` and `fable` models (`init.sh` resolves the names) |
 | automated PR review | the repository's own (for example the `claude-review` GitHub check) |
 | scope | what the prompt names: one task, one ticket, a list, or the open sub-issues of an epic |
@@ -62,6 +64,7 @@ chose in the summary.
 | orchestrator | you, in the Herdr tab/pane the user talks to | |
 | implementer | `pi` in a named Herdr tab (`herdr_subagent`), one per ticket, clean context | `IMPLEMENTER_MODEL` |
 | Advisor of the implementer | pi-advisor extension (`ask_advisor` tool and gates), global config | (none) |
+| scribe | `pi` in a named Herdr tab (`herdr_subagent`, `advisor: false`), composes PR descriptions and docs from orchestrator/implementer notes | `SCRIBE_MODEL` |
 | reviewers | `pi` in a named Herdr tab (`herdr_subagent`, `advisor: false`), read-only, one round at a time | `REVIEWER_MODELS` |
 | automated PR review | GitHub Action, runs when the PR opens | `CLAUDE_REVIEW_CHECK` |
 
@@ -80,11 +83,20 @@ reviewers in different model families: on earlier runs each family found real bu
 automated review missed (lost hover states, a rem fallback that beat the px theme, a deploy race, a silently
 skipped CI test, lost images, skipped saves, unbounded caches).
 
+**Scribe.** Use the `scribe` subagent (`SCRIBE_MODEL`, `advisor: false`) whenever composing or updating text
+for human consumption: PR descriptions (`$PR_WORK/$T-pr.md`) and user-facing documentation changes (READMEs,
+guides, changelogs, doc pages). Feed it instructions and source facts from the orchestrator and implementer
+(the ticket `$PR_WORK/$T.md`, the implementer's report `$PR_WORK/$T-report.md`, `git log` / diff summary, and
+any repo PR template or doc style rules). Instruct it to stay clear, concise, and faithful to the verified
+facts (no em dashes, no invented claims, no code edits). Run the scribe only when the implementer is idle so
+they never edit the shared checkout at the same time. Save its worker ID in `$PR_WORK/$T-scribe` so you can
+reuse it with `herdr_subagent send` if the PR description or docs need updating after later commits.
+
 **Advisor rules.** The implementer gets the Advisor from the global pi-advisor config: omit `advisor` when
 starting it via `herdr_subagent`. Do not change `advisor.json`: it is the user's setting. `preflight.sh`
 prints a `WARN` line if the Advisor is off, or if it is the implementer model (pi-advisor then skips every
-call, unless `advisorDisableSameModel` is false). Continue, and put the warning in the summary. The reviewers
-must use only their own model: pass `advisor: false` to `herdr_subagent` (or `--exclude-tools
+call, unless `advisorDisableSameModel` is false). Continue, and put the warning in the summary. The scribe
+and reviewers must use only their own model: pass `advisor: false` to `herdr_subagent` (or `--exclude-tools
 ask_advisor,record_advisor_outcome` in fallback mode), which removes the tool, the prompt rules and the
 automatic gates.
 
@@ -101,7 +113,7 @@ tab (click the card or `/subagents <id>`).
 ```bash
 test "$HERDR_ENV" = 1            # Stop if you are not in herdr.
 S=~/.agents/skills/pr-workflow/scripts
-# Give IMPLEMENTER_MODEL or REVIEWER_MODELS="<id> <id> .." only if the user named other models.
+# Give IMPLEMENTER_MODEL, SCRIBE_MODEL, or REVIEWER_MODELS="<id> <id> .." only if the user named other models.
 eval "$($S/init.sh <RUN_ID> <REPO_PATH>)"   # Prints: export PR_WORK=~/.cache/pr-workflow/<RUN_ID>
 $S/preflight.sh                  # herdr, gpg signing, models, Advisor, gh auth, clean tree
 ```
@@ -119,9 +131,10 @@ Then:
 - **Order.** Write `$PR_WORK/ORDER.txt`, one ticket per line (one line for a single PR). Respect the blocking
   relations. Put unblockers first. Put whole-repo reformatting (prettier and similar) last. Mark progress in
   this file (`<ID> done #<PR>`), so you can resume after a context reset.
-- **Brief.** Edit `$PR_WORK/BRIEF.md` (copied from `templates/BRIEF.md`): the repo rules, the CI commands, the
-  builds to run, and the environment notes (for example the container socket). Keep the test coverage,
-  committing, and deliverables sections. All subagents read it first.
+- **Briefs.** Edit `$PR_WORK/BRIEF.md` (copied from `templates/BRIEF.md`): the repo rules, the CI commands,
+  the builds to run, and the environment notes (for example the container socket). Keep the test coverage,
+  committing, and deliverables sections. Implementers read it first. `$PR_WORK/SCRIBE.md` (copied from
+  `templates/SCRIBE.md`) holds the writing and PR-description rules for the `scribe`.
 - **CI facts.** Find out which checks run on PRs (`.circleci/config.yml`, `.github/workflows/*`), and how the
   automated review is triggered. Set `CLAUDE_REVIEW_CHECK` in `config.env` to its check name, or to `""` if
   there is none. In the reference repo it runs only on `opened`, `ready_for_review` and `review_requested`, so
@@ -153,7 +166,7 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
    - `blocked`: tell the user to open the tab (click the card or `/subagents <id>`).
    - `failed`, `aborted`, or `disconnected`: inspect `output` and `sessionFile` before deciding next steps.
    - `completed`: this means Pi finished responding, not that the work is complete. Verify the deliverables in
-     step 5; if `$PR_WORK/$T-report.md`, `$PR_WORK/$T-pr.md`, or commits are missing (or the worker asked a
+     step 5; if `$PR_WORK/$T-report.md` or commits are missing (or the worker asked a
      question), `send` a follow-up once idle and `wait` again.
 5. **Validate.** Read `$PR_WORK/$T-report.md`. Check `git status` (clean), `git log --format='%h %G? %s'
    $BASE..HEAD` (all commits signed: `G`), and look at the key production diffs yourself. Look for
@@ -162,41 +175,60 @@ T=<ticket id>; BASE=<default branch, or the previous ticket branch in a stack>
    (or the report says why there is none), the report lists the new tests and what each one protects, gives
    the mutation-check result, and shows that the tests ran. If tests are missing or weak, send the
    implementer back with `herdr_subagent send` + `wait` before review pass 1.
-6. **Review pass 1, before the PR.** Run one round for each reviewer (see "A review round"). The fixes stay
+6. **Scribe: docs and PR description.** While the implementer is idle, start the scribe with
+   `herdr_subagent({ action: "start", name: "$T-scribe", model: <SCRIBE_MODEL>, advisor: false, cwd: <REPO>, prompt: "..." })`
+   and save its worker ID in `$PR_WORK/$T-scribe`. Point it at `$PR_WORK/SCRIBE.md`, the ticket
+   (`$PR_WORK/$T.md`), the implementer's report (`$PR_WORK/$T-report.md`), the diff summary
+   (`git log --oneline $BASE..HEAD` and `git diff --stat $BASE...HEAD`), any repo PR template, and specific
+   instructions from the orchestrator and implementer. Ask it to:
+   - write or update any human-facing documentation files needed for the ticket (leaving production code and
+     tests untouched, committing doc changes with signed conventional commits and a clean tree), and
+   - write `$PR_WORK/$T-pr.md` (and polish `$PR_WORK/$T-pr-title.txt` if needed).
+   Wait with `herdr_subagent wait` (`timeoutSeconds: 600`, looping on `timedOut`), then verify
+   `$PR_WORK/$T-pr.md` is non-empty and short, and if docs were edited, verify `git status` is clean, commits
+   are signed, and only doc files changed.
+7. **Review pass 1, before the PR.** Run one round for each reviewer (see "A review round"). The fixes stay
    local commits.
-7. **Open the PR.** Read `$PR_WORK/$T-pr.md`. It must be short (see "PR descriptions"); if it is not, ask
-   the implementer to cut it. Run `$S/review-summary.sh $T --update-pr` to put the table of review rounds
-   under `## Reviews`. Then `$S/create-pr.sh $T $BASE` (it refuses a dirty tree and em dashes, pushes, checks
-   that the remote head equals HEAD, and opens the PR against `BASE`). Set a tracker ticket to "In Review".
-8. **CI until green.** `$S/wait-pr.sh <PR> 80 --review` (the first time only: it also waits for the
+8. **Open the PR.** Read `$PR_WORK/$T-pr.md`. If review pass 1 changed anything material, or if the
+   description is too long, send a follow-up to the idle scribe (`herdr_subagent send` + `wait`) to rewrite
+   `$PR_WORK/$T-pr.md` for the final state (and update docs if needed). Run `$S/review-summary.sh $T
+   --update-pr` to put the table of review rounds under `## Reviews`. Then `$S/create-pr.sh $T $BASE` (it
+   refuses a dirty tree and em dashes, pushes, checks that the remote head equals HEAD, and opens the PR
+   against `BASE`). Set a tracker ticket to "In Review".
+9. **CI until green.** `$S/wait-pr.sh <PR> 80 --review` (the first time only: it also waits for the
    automated review). On a failure, see "CI failures": make sure the implementer is idle, `send` the fix
    prompt via `herdr_subagent`, `wait` until settled, verify commits and clean tree, `$S/push-check.sh`,
    and `$S/wait-pr.sh <PR> 80` again. Do not continue while any check is red.
-9. **PR feedback.** `$S/fetch-feedback.sh $T` writes `$PR_WORK/$T-feedback.md` (the automated review and
-   comments from people; it leaves out our own replies). Do not wait for people who have not reviewed yet.
-   If there is feedback, make sure the implementer is idle and send it ONE prompt with
-   `herdr_subagent({ action: "send", id: <worker-id>, prompt: "..." })`: name the file, say for each item
-   whether to fix it or to reply only, ask for NEW commits, a replies file `$PR_WORK/$T-replies.md` (format
-   in the brief; inline replies are for the inline comment ids), and an updated PR description if material.
-   Then `herdr_subagent wait` until settled, confirm `$PR_WORK/$T-replies.md` and new signed commits exist,
-   check the diff, `$S/push-check.sh`, `gh pr edit <PR> --body-file $PR_WORK/$T-pr.md`, and
-   `$S/post-replies.py $T` (it posts the top-level reply and one reply to each inline comment; it skips
-   `## follow-ups`). For a later feedback round, use `$T-replies2.md` and
-   `$S/post-replies.py $T <PR> $PR_WORK/$T-replies2.md`.
-10. **Review pass 2.** Run one round for each reviewer again. Then, while the last round had high or medium
+10. **PR feedback.** `$S/fetch-feedback.sh $T` writes `$PR_WORK/$T-feedback.md` (the automated review and
+    comments from people; it leaves out our own replies). Do not wait for people who have not reviewed yet.
+    If there is feedback, make sure the implementer is idle and send it ONE prompt with
+    `herdr_subagent({ action: "send", id: <worker-id>, prompt: "..." })`: name the file, say for each item
+    whether to fix it or to reply only, ask for NEW commits, a replies file `$PR_WORK/$T-replies.md` (format
+    in the brief; inline replies are for the inline comment ids), and notes on any doc or PR-description
+    updates needed. Then `herdr_subagent wait` until settled and confirm `$PR_WORK/$T-replies.md` and new
+    signed commits exist. If the changes are material or affect human-facing docs, send a follow-up to the
+    idle scribe to update docs and rewrite `$PR_WORK/$T-pr.md` for the new final state (preserving `## Reviews`),
+    then run `$S/review-summary.sh $T --update-pr`. Check the diff, `$S/push-check.sh`,
+    `gh pr edit <PR> --body-file $PR_WORK/$T-pr.md`, and `$S/post-replies.py $T` (it posts
+    the top-level reply and one reply to each inline comment; it skips `## follow-ups`). For a later feedback
+    round, use `$T-replies2.md` and `$S/post-replies.py $T <PR> $PR_WORK/$T-replies2.md`.
+11. **Review pass 2.** Run one round for each reviewer again. Then, while the last round had high or medium
     findings that changed code, run one more round (`start-review.sh --prepare` picks the next reviewer). Stop
     when a round has no high or medium finding to fix. After 3 extra rounds, stop and put the open findings in
     the summary. If HEAD did not change since the last review round of pass 1 (no CI fix and no feedback fix),
     skip pass 2 and say so in the summary.
-11. **Push and CI until green again.** `$S/push-check.sh`, `$S/review-summary.sh $T --update-pr`,
-    `gh pr edit <PR> --body-file $PR_WORK/$T-pr.md`, and `$S/wait-pr.sh <PR> 80`, as in step 8. If a CI fix
-    now changes production code, run one more review round. NEVER conclude a PR while a check is red or pending.
-12. **Close out.** Close each idle worker created for this ticket (implementer in `$PR_WORK/$T-worker` and
-    reviewers recorded as `sub:<id>` in `$PR_WORK/$T-reviews.tsv`, or found via `herdr_subagent list`) with
-    `herdr_subagent({ action: "close", id })`. Unlike standalone `/skill:review`, `pr-workflow` closes its own
-    reviewer and implementer tabs at close-out. `close` only removes original panes that confirm they are
-    idle; never close the user's own tabs. Mark the ticket done in `ORDER.txt`, and print the PR summary (below).
-13. **Next item.** If the user gave a list, start the next ticket at once, with `BASE` = this ticket's branch
+12. **Push and CI until green again.** If pass 2 or CI fixes changed anything material, ask the idle scribe
+    to update `$PR_WORK/$T-pr.md` (and any affected docs). Then `$S/push-check.sh`, `$S/review-summary.sh $T
+    --update-pr`, `gh pr edit <PR> --body-file $PR_WORK/$T-pr.md`, and `$S/wait-pr.sh <PR> 80`, as in step 9.
+    If a CI fix now changes production code, run one more review round. NEVER conclude a PR while a check is
+    red or pending.
+13. **Close out.** Close each idle worker created for this ticket (implementer in `$PR_WORK/$T-worker`,
+    scribe in `$PR_WORK/$T-scribe`, and reviewers recorded as `sub:<id>` in `$PR_WORK/$T-reviews.tsv`, or
+    found via `herdr_subagent list`) with `herdr_subagent({ action: "close", id })`. Unlike standalone
+    `/skill:review`, `pr-workflow` closes its own scribe, reviewer, and implementer tabs at close-out. `close`
+    only removes original panes that confirm they are idle; never close the user's own tabs. Mark the ticket
+    done in `ORDER.txt`, and print the PR summary (below).
+14. **Next item.** If the user gave a list, start the next ticket at once, with `BASE` = this ticket's branch
     (or the default branch, see "Defaults"). After the last item, print a table of all PRs.
 
 ### A review round
@@ -282,6 +314,7 @@ Check the commit statuses of recent `main` commits to see if a check is already 
 If `herdr_subagent` is not installed, use the pane scripts in `scripts/` instead:
 
 - **Start / wait implementer:** `$S/start-ticket.sh $T $BASE "<guidance>"` (splits a pane, writes `$PR_WORK/$T-pane`, launches `pi` with a positional prompt and `--thinking "$THINKING"`, expects `touch $PR_WORK/$T-done`), then `$S/wait-done.sh $T` (exit 0 done, 3 timeout/call again, 5 idle without signal, 1 pane closed).
+- **Scribe:** run `pi --model "$SCRIBE_MODEL" --exclude-tools ask_advisor,record_advisor_outcome -p "<prompt>"` (or launch in a split pane with `launch_pi` and a done-file) to compose `$PR_WORK/$T-pr.md` and documentation updates.
 - **Review round:** `$S/start-review.sh $T $BASE` (without `--prepare`; splits a pane, passes `--exclude-tools ask_advisor,record_advisor_outcome`, expects `touch ...-done`), then `$S/wait-review.sh $T`.
 - **Follow-ups:** `$S/prompt.sh <pane> "<prompt> As your very last action, touch $PR_WORK/$T-<signal>."` then `$S/wait-done.sh $T <signal>`. `prompt.sh` sends once as a steering message if already working, or retries until `working`.
 - **Close out:** `$S/close-panes.sh $T` (closes only recorded panes, skipping `sub:*` entries and `$HERDR_PANE_ID`).
@@ -370,7 +403,7 @@ PR author, say what changed with commit shas, or why not.
 
 Keep them short. A PR description says what changed and why, as the final state of the code. It does not tell
 the story of how the work got there: no attempts, no command logs, no list of review findings or fixes. That
-detail goes in the report (`$PR_WORK/$T-report.md`). The sections (the brief has the same list):
+detail goes in the report (`$PR_WORK/$T-report.md`). The sections (pass these to the `scribe`):
 
 - a summary: a few bullets on what changed and why (one bullet can name the new test coverage),
 - "Decisions and open questions": the choices made, and what a reviewer should think about (omit if none),

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Usage: [IMPLEMENTER_MODEL=..] [REVIEWER_MODELS="<id> <id> .."] \
+# Usage: [IMPLEMENTER_MODEL=..] [SCRIBE_MODEL=..] [REVIEWER_MODELS="<id> <id> .."] \
 #          init.sh <RUN_ID> <REPO_PATH> [GH_REPO]
 # Make the work directory of a run and its config. Print the export line.
 # Do not ask the user for the models. The defaults: the implementer uses the
-# model of the current pi session, and the reviewers are the newest neon,
-# astra and fable models. Give other values only if the user named them.
+# model of the current pi session, the scribe uses the newest gemini neon
+# model, and the reviewers are the newest neon, astra and fable models. Give
+# other values only if the user named them.
 # The Advisor of the implementer is the global pi-advisor config. This script
 # does not set it.
 # Keep the work directory out of /tmp: state files there were lost during
@@ -19,6 +20,10 @@ if [ ! -f "$WORK/config.env" ]; then
   if [ -z "${IMPLEMENTER_MODEL:-}" ]; then
     [ -n "${PI_PROVIDER:-}" ] && [ -n "${PI_MODEL:-}" ] || { echo "PI_PROVIDER/PI_MODEL not set: give IMPLEMENTER_MODEL" >&2; exit 1; }
     IMPLEMENTER_MODEL="$PI_PROVIDER/$PI_MODEL"
+  fi
+  if [ -z "${SCRIBE_MODEL:-}" ]; then
+    SCRIBE_MODEL=$("$SKILL_DIR/scripts/resolve-model.sh" "gemini neon" 1 2>/dev/null)
+    [ -n "$SCRIBE_MODEL" ] || { echo "no model matches 'gemini neon'" >&2; exit 1; }
   fi
   if [ -z "${REVIEWER_MODELS:-}" ]; then
     for name in neon astra fable; do
@@ -35,6 +40,9 @@ GH_REPO="$GH_REPO"
 # The implementer runs with the global pi-advisor config. The reviewers run
 # without the Advisor (start-review.sh excludes the Advisor tools).
 IMPLEMENTER_MODEL="$IMPLEMENTER_MODEL"
+# Scribe for human-facing text (PR descriptions, documentation). Runs without
+# the Advisor.
+SCRIBE_MODEL="$SCRIBE_MODEL"
 # The reviewers, in order. Review round N uses the reviewer at position
 # (N-1) modulo the count, so each pass runs every reviewer once, in order.
 REVIEWER_MODELS="$REVIEWER_MODELS"
@@ -50,6 +58,7 @@ else
 fi
 # The panes of the subagents do not have PR_WORK, so write the real path.
 [ -f "$WORK/BRIEF.md" ] || sed "s#\$PR_WORK#$WORK#g" "$SKILL_DIR/templates/BRIEF.md" > "$WORK/BRIEF.md"
+[ -f "$WORK/SCRIBE.md" ] || sed "s#\$PR_WORK#$WORK#g" "$SKILL_DIR/templates/SCRIBE.md" > "$WORK/SCRIBE.md"
 touch "$WORK/ORDER.txt"
-grep -E '^(IMPLEMENTER_MODEL|REVIEWER_MODELS)=' "$WORK/config.env" >&2
+grep -E '^(IMPLEMENTER_MODEL|SCRIBE_MODEL|REVIEWER_MODELS)=' "$WORK/config.env" >&2
 echo "export PR_WORK=$WORK"
